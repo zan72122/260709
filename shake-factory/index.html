@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>まっすぐシャカシャカ ふりわけ工場</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { width:100%; height:100%; overflow:hidden; position:fixed; background:#ffeef2;
+    font-family:'Hiragino Maru Gothic ProN','ヒラギノ丸ゴ ProN W4','Rounded Mplus 1c','M PLUS Rounded 1c','Yu Gothic UI',sans-serif;
+    touch-action:none; user-select:none; -webkit-user-select:none; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; touch-action:none; }
+
+  /* ---------- title splash ---------- */
+  #splash { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:4vmin;
+    background:linear-gradient(180deg,#ffe3ec 0%,#fff6e3 45%,#d9f4ff 100%);
+    transition:opacity .6s ease, visibility .6s; }
+  #splash.hidden { opacity:0; visibility:hidden; }
+  #splash .gear { font-size:13vmin; animation:spinSlow 6s linear infinite; filter:drop-shadow(0 1vmin 0 rgba(255,150,180,.35)); }
+  #splash h1 { font-size:6.4vmin; color:#ff6b95; text-align:center; line-height:1.5;
+    text-shadow:0 .8vmin 0 #ffffff, 0 1.2vmin 2vmin rgba(255,120,160,.35); letter-spacing:.08em; }
+  #splash h1 .sub { display:block; font-size:4.2vmin; color:#4db6d9; }
+  #splash .tap { margin-top:2vmin; font-size:4.4vmin; color:#fff; background:linear-gradient(180deg,#ffb2c8,#ff7ba1);
+    border-radius:6vmin; padding:2.4vmin 7vmin; box-shadow:0 1.2vmin 0 #e05a84, 0 2vmin 3vmin rgba(224,90,132,.35);
+    animation:bounce 1.4s ease-in-out infinite; }
+  #splash .hint-marbles { display:flex; gap:2vmin; }
+  #splash .hint-marbles span { width:4.6vmin; height:4.6vmin; border-radius:50%; display:inline-block;
+    box-shadow:inset -0.8vmin -0.8vmin 0 rgba(0,0,0,.12), inset 0.6vmin 0.8vmin 0 rgba(255,255,255,.75);
+    animation:bounce 1.2s ease-in-out infinite; }
+  #splash .hint-marbles span:nth-child(2){ animation-delay:.15s } #splash .hint-marbles span:nth-child(3){ animation-delay:.3s }
+  #splash .hint-marbles span:nth-child(4){ animation-delay:.45s } #splash .hint-marbles span:nth-child(5){ animation-delay:.6s }
+  @keyframes bounce { 0%,100%{ transform:translateY(0) } 50%{ transform:translateY(-1.6vmin) } }
+  @keyframes spinSlow { to { transform:rotate(360deg) } }
+
+  /* ---------- HUD ---------- */
+  #hud { position:fixed; inset:0; z-index:10; pointer-events:none;
+    padding:calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 8px)
+            calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 8px); }
+
+  #mission { position:absolute; top:calc(env(safe-area-inset-top) + 10px); left:calc(env(safe-area-inset-left) + 10px);
+    max-width:62vw; background:rgba(255,255,255,.82); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+    border-radius:20px; padding:9px 14px; box-shadow:0 4px 14px rgba(255,130,170,.25), inset 0 0 0 3px #ffd9e6;
+    display:flex; align-items:center; gap:10px; transition:transform .35s cubic-bezier(.34,1.56,.64,1); }
+  #mission.pop { transform:scale(1.12) rotate(-2deg); }
+  #mission canvas { width:44px; height:44px; flex:0 0 44px; }
+  #mission .txt { font-size:14px; color:#7a5568; font-weight:bold; line-height:1.45; }
+  #mission .stars { font-size:13px; margin-top:2px; letter-spacing:2px; }
+  #mission .bar { height:8px; border-radius:5px; background:#ffe3ee; margin-top:5px; overflow:hidden; width:100%; }
+  #mission .bar > div { height:100%; width:0%; border-radius:5px;
+    background:linear-gradient(90deg,#ffd54f,#ff8fb3); transition:width .3s; }
+
+  #topBtns { position:absolute; top:calc(env(safe-area-inset-top) + 10px); right:calc(env(safe-area-inset-right) + 10px);
+    display:flex; flex-direction:column; gap:10px; }
+  .roundBtn { pointer-events:auto; width:52px; height:52px; border-radius:50%; border:none; font-size:26px;
+    background:rgba(255,255,255,.85); box-shadow:0 4px 10px rgba(180,120,160,.3), inset 0 0 0 3px #cdeef7;
+    display:flex; align-items:center; justify-content:center; color:#5a7d8a; transition:transform .15s; }
+  .roundBtn:active { transform:scale(.86); }
+
+  /* ---------- color palette ---------- */
+  #palette { position:absolute; display:flex; gap:10px; pointer-events:auto;
+    background:rgba(255,255,255,.72); border-radius:32px; padding:8px 12px;
+    box-shadow:0 4px 14px rgba(180,120,160,.25), inset 0 0 0 3px #ffe9f1;
+    backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); }
+  #palette .swatch { width:46px; height:46px; border-radius:50%; border:none; position:relative;
+    box-shadow:inset -6px -7px 0 rgba(0,0,0,.14), inset 5px 6px 0 rgba(255,255,255,.65), 0 3px 6px rgba(0,0,0,.15);
+    transition:transform .18s cubic-bezier(.34,1.56,.64,1); transform:scale(.88); }
+  #palette .swatch.active { transform:scale(1.12); box-shadow:inset -6px -7px 0 rgba(0,0,0,.14),
+    inset 5px 6px 0 rgba(255,255,255,.65), 0 0 0 4px #fff, 0 0 0 7px currentColor, 0 4px 10px rgba(0,0,0,.2); }
+  #palette .swatch::after { content:""; position:absolute; top:16%; left:20%; width:26%; height:20%;
+    border-radius:50%; background:rgba(255,255,255,.85); transform:rotate(-25deg); }
+
+  @media (max-width: 480px) {
+    #palette { gap:7px; padding:6px 9px; }
+    #palette .swatch { width:40px; height:40px; }
+    #mission .txt { font-size:12.5px; }
+    #mission canvas { width:38px; height:38px; flex:0 0 38px; }
+    .roundBtn { width:46px; height:46px; font-size:22px; }
+  }
+
+  /* ---------- handle hint ---------- */
+  #handleHint { position:absolute; z-index:12; pointer-events:none; display:flex; flex-direction:column;
+    align-items:center; gap:2px; transition:opacity .8s; }
+  #handleHint.hidden { opacity:0; }
+  #handleHint .arrow { font-size:54px; color:#ff7ba1; animation:spinSlow 2.6s linear infinite;
+    text-shadow:0 2px 0 #fff; }
+  #handleHint .label { font-size:16px; font-weight:bold; color:#ff6b95; background:rgba(255,255,255,.9);
+    padding:4px 14px; border-radius:14px; box-shadow:0 3px 8px rgba(255,120,160,.3); animation:bounce 1.4s infinite; }
+
+  /* ---------- toast ---------- */
+  #toast { position:absolute; left:50%; top:26%; transform:translate(-50%,-50%) scale(0); z-index:20;
+    font-size:34px; font-weight:bold; color:#fff; text-align:center; line-height:1.4;
+    text-shadow:0 3px 0 #e05a84, 0 6px 16px rgba(224,90,132,.5); pointer-events:none;
+    transition:transform .4s cubic-bezier(.34,1.56,.64,1); white-space:nowrap; }
+  #toast.show { transform:translate(-50%,-50%) scale(1); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="hud">
+  <div id="mission">
+    <canvas id="missionIcon" width="88" height="88"></canvas>
+    <div style="flex:1;min-width:0">
+      <div class="txt" id="missionText">まわしてね！</div>
+      <div class="bar"><div id="missionBar"></div></div>
+      <div class="stars" id="missionStars"></div>
+    </div>
+  </div>
+  <div id="topBtns">
+    <button class="roundBtn" id="btnSound" aria-label="sound">🔊</button>
+    <button class="roundBtn" id="btnReset" aria-label="reset">🫧</button>
+  </div>
+  <div id="palette"></div>
+  <div id="handleHint" class="hidden">
+    <div class="arrow">↻</div>
+    <div class="label">くるくる まわしてね！</div>
+  </div>
+  <div id="toast"></div>
+</div>
+
+<div id="splash">
+  <div class="gear">⚙️</div>
+  <h1>まっすぐシャカシャカ<br>ふりわけ工場<span class="sub">〜くるくる まわすと まっすぐ うごく！〜</span></h1>
+  <div class="hint-marbles">
+    <span style="background:#ff5a7e"></span><span style="background:#4fc3f7"></span>
+    <span style="background:#ffd54f"></span><span style="background:#66e08a"></span>
+    <span style="background:#b388ff"></span>
+  </div>
+  <div class="tap">タップして スタート！</div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
