@@ -115,6 +115,77 @@ export class AudioEngine {
     this._tone(300 + Math.random() * 60, t, 0.12, 'triangle', 0.05, 240);
   }
 
+  // ゴロン: heavy wooden roll as something tips over the rim
+  tumble(size = 0.3) {
+    if (!this._ok('tumble', 0.12)) return;
+    const t = this._now();
+    const f = 220 / (0.5 + size);
+    this._tone(f, t, 0.22, 'triangle', 0.14, f * 0.6);
+    this._tone(f * 0.55, t + 0.08, 0.28, 'sine', 0.12, f * 0.4);
+    this._noise(t, 0.12, { freq: 500, q: 1, vol: 0.05 });
+  }
+
+  // コツン: bouncing off the shaft wall on the way down, echoey
+  wallBump(size = 0.3, speed = 1) {
+    if (!this._ok('bump', 0.07)) return;
+    const t = this._now();
+    const f = 320 / (0.5 + size);
+    const vol = Math.min(0.2, 0.06 + speed * 0.03);
+    this._tone(f * 1.9, t, 0.06, 'sine', vol, f * 1.2);
+    this._tone(f, t, 0.16, 'triangle', vol * 0.9, f * 0.7);
+    // faint echo: it's deep down there
+    this._tone(f, t + 0.09, 0.18, 'sine', vol * 0.35, f * 0.6);
+  }
+
+  pinataPop() {
+    if (!this._ok()) return;
+    const t = this._now();
+    this._noise(t, 0.15, { type: 'highpass', freq: 500, vol: 0.25 });
+    this._tone(180, t, 0.2, 'square', 0.1, 90);
+    // party-horn rip
+    for (let i = 0; i < 3; i++) {
+      this._tone(520 + i * 40, t + 0.06 + i * 0.1, 0.16, 'sawtooth', 0.06, 700 + i * 60);
+    }
+    for (let i = 0; i < 8; i++) {
+      const st = PENTA[(Math.random() * PENTA.length) | 0];
+      this._tone(1040 * Math.pow(2, st / 12), t + 0.15 + i * 0.05, 0.3, 'sine', 0.07);
+    }
+  }
+
+  catchJingle() {
+    if (!this._ok()) return;
+    const t = this._now();
+    const seq = [0, 4, 7, 12];
+    seq.forEach((st, i) => {
+      const f = 784 * Math.pow(2, st / 12);
+      this._tone(f, t + i * 0.07, 0.24, 'triangle', 0.14);
+      this._tone(f * 2, t + i * 0.07, 0.14, 'sine', 0.04);
+    });
+  }
+
+  piyo(low = false) {
+    if (!this._ok('piyo', 0.12)) return;
+    const t = this._now();
+    const base = low ? 620 : 1150;
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(base, t);
+    o.frequency.exponentialRampToValueAtTime(base * 1.6, t + 0.05);
+    o.frequency.exponentialRampToValueAtTime(base * 0.9, t + 0.11);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.09, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+    o.connect(g).connect(this.master);
+    o.start(t); o.stop(t + 0.16);
+    if (low) this._tone(base * 0.8, t + 0.14, 0.1, 'sine', 0.06, base * 0.9);
+  }
+
+  peck() {
+    if (!this._ok('peck', 0.2)) return;
+    const t = this._now();
+    this._tone(1900, t, 0.03, 'square', 0.025, 1400);
+  }
+
   boing(size = 0.3) {
     if (!this._ok('boing', 0.1)) return;
     const t = this._now();
