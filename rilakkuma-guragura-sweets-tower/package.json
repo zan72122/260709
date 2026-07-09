@@ -1,0 +1,11 @@
+{
+  "name": "rilakkuma-guragura-sweets-tower",
+  "version": "1.0.0",
+  "description": "ねらって！とばして！リラックマ ぐらぐらスイーツタワー — cozy bear sweets-stacking 3D game for small kids",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node test/core-test.mjs && node test/smoke.mjs"
+  }
+}
