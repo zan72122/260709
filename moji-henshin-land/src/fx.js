@@ -9,8 +9,8 @@ export class FxSystem {
     this.bursts = [];
   }
 
-  // 中心から放射状にはじけるキラキラ
-  burst(center, count = 26, speed = 4.2, life = 0.9) {
+  // 中心から放射状にはじけるキラキラ(colors指定でクラム等の色替え可)
+  burst(center, count = 26, speed = 4.2, life = 0.9, colors = COLORS) {
     const geo = new THREE.BufferGeometry();
     const pos = new Float32Array(count * 3);
     const col = new Float32Array(count * 3);
@@ -20,7 +20,7 @@ export class FxSystem {
       pos[i * 3] = center.x;
       pos[i * 3 + 1] = center.y;
       pos[i * 3 + 2] = center.z;
-      c.setHex(COLORS[(Math.random() * COLORS.length) | 0]);
+      c.setHex(colors[(Math.random() * colors.length) | 0]);
       col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(Math.random() * 2 - 1);

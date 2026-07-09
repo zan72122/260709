@@ -94,6 +94,59 @@ export const sfx = {
       tone({ type: 'sine', f0: f, f1: f * 1.02, dur: 0.22, peak: 0.09, delay: i * 0.05 });
     });
   },
+  // かさかさ(紙)
+  rustle() {
+    noiseBurst({ dur: 0.12, peak: 0.12, f0: 2500, f1: 4500, q: 0.7 });
+    noiseBurst({ dur: 0.1, peak: 0.08, f0: 3000, f1: 5000, q: 0.7, delay: 0.08 });
+  },
+  // ピンッ(紙が張る)
+  snap() {
+    tone({ type: 'triangle', f0: 900, f1: 1400, dur: 0.07, peak: 0.22 });
+    noiseBurst({ dur: 0.05, peak: 0.08, f0: 3000, f1: 5000, q: 1.5 });
+  },
+  // ぱたぱた(はばたき)
+  flap() {
+    noiseBurst({ dur: 0.09, peak: 0.14, f0: 300, f1: 700, q: 0.8 });
+  },
+  // ぽこっ(パーツ出現)
+  poko() {
+    tone({ type: 'sine', f0: 300, f1: 620, dur: 0.09, peak: 0.22 });
+  },
+  // にゅ〜っ(伸びる)
+  grow() {
+    tone({ type: 'sine', f0: 160, f1: 520, dur: 0.4, peak: 0.16, curve: 'lin' });
+  },
+  // コロコロ(転がる)
+  coro() {
+    tone({ type: 'sine', f0: 240, f1: 200, dur: 0.06, peak: 0.14 });
+    tone({ type: 'sine', f0: 300, f1: 260, dur: 0.06, peak: 0.12, delay: 0.11 });
+  },
+  // ガブッ!(かじる)
+  chomp() {
+    noiseBurst({ dur: 0.1, peak: 0.3, f0: 900, f1: 300, q: 0.9 });
+    tone({ type: 'sawtooth', f0: 260, f1: 90, dur: 0.16, peak: 0.24, delay: 0.02 });
+  },
+  // ドスン!(足ぶみ)
+  stomp() {
+    tone({ type: 'sine', f0: 95, f1: 45, dur: 0.24, peak: 0.42 });
+    noiseBurst({ dur: 0.12, peak: 0.14, f0: 200, f1: 90, q: 0.7 });
+  },
+  // ガオーッ!(きょうりゅう)
+  roar() {
+    tone({ type: 'sawtooth', f0: 190, f1: 85, dur: 0.55, peak: 0.2, curve: 'lin' });
+    tone({ type: 'sawtooth', f0: 240, f1: 120, dur: 0.5, peak: 0.12, delay: 0.05, curve: 'lin' });
+    noiseBurst({ dur: 0.5, peak: 0.08, f0: 500, f1: 200, q: 0.6 });
+  },
+  // パオーン!(ぞう)
+  trumpet() {
+    tone({ type: 'square', f0: 360, f1: 620, dur: 0.22, peak: 0.14, curve: 'lin' });
+    tone({ type: 'square', f0: 620, f1: 520, dur: 0.3, peak: 0.14, delay: 0.2, curve: 'lin' });
+    tone({ type: 'sawtooth', f0: 180, f1: 300, dur: 0.45, peak: 0.09, curve: 'lin' });
+  },
+  // ぷしゃー(水しぶき)
+  spray() {
+    noiseBurst({ dur: 0.5, peak: 0.16, f0: 2000, f1: 5000, q: 0.6 });
+  },
   // ファンファーレ(できた!)
   tada() {
     const seq = [523, 659, 784, 1047];

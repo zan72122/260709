@@ -1,54 +1,23 @@
-// もじへんしんランド — ABCDEをさわって変身させるMetamorphabet風ゲーム
+// もじへんしんランド — 文字の形がそのまま変身するMetamorphabet風ゲーム
+// つつく(3回)→ 引っぱる(2回)→ 回す で、文字が段階的にひとつの姿へ変身する。
 import * as THREE from 'three';
 import { buildLetterMesh } from './letters.js';
-import {
-  buildApple, buildAnt, buildBird, buildBalloon, buildCat,
-  buildCloud, buildDog, buildDuck, buildElephant, buildEgg,
-} from './creatures.js';
+import { createTransform } from './transforms.js';
 import { FxSystem } from './fx.js';
 import { unlockAudio, sfx } from './audio.js';
+import { updateTweens, clearTweens } from './anim.js';
 
 const LETTERS = [
-  {
-    char: 'A', color: 0xff6b6b,
-    words: [
-      { name: 'Apple', emoji: '🍎', build: buildApple, labelColor: '#ff5d5d' },
-      { name: 'Ant', emoji: '🐜', build: buildAnt, labelColor: '#9c4a2f' },
-    ],
-  },
-  {
-    char: 'B', color: 0x4dabf7,
-    words: [
-      { name: 'Bird', emoji: '🐦', build: buildBird, labelColor: '#2f8fd8' },
-      { name: 'Balloon', emoji: '🎈', build: buildBalloon, labelColor: '#f06ba8' },
-    ],
-  },
-  {
-    char: 'C', color: 0xffa94d,
-    words: [
-      { name: 'Cat', emoji: '🐱', build: buildCat, labelColor: '#f08c00' },
-      { name: 'Cloud', emoji: '☁️', build: buildCloud, labelColor: '#74a9d8' },
-    ],
-  },
-  {
-    char: 'D', color: 0x9775fa,
-    words: [
-      { name: 'Dog', emoji: '🐶', build: buildDog, labelColor: '#a5754a' },
-      { name: 'Duck', emoji: '🦆', build: buildDuck, labelColor: '#e0a800' },
-    ],
-  },
-  {
-    char: 'E', color: 0x51cf66,
-    words: [
-      { name: 'Elephant', emoji: '🐘', build: buildElephant, labelColor: '#7b8fc0' },
-      { name: 'Egg', emoji: '🥚', build: buildEgg, labelColor: '#d8a24a' },
-    ],
-  },
+  { char: 'A', color: 0xff6b6b, word: { name: 'Airplane', emoji: '✈️', labelColor: '#7a95b8' } },
+  { char: 'B', color: 0x4dabf7, word: { name: 'Butterfly', emoji: '🦋', labelColor: '#2f8fd8' } },
+  { char: 'C', color: 0xffa94d, word: { name: 'Cookie', emoji: '🍪', labelColor: '#b9772f' } },
+  { char: 'D', color: 0x9775fa, word: { name: 'Dinosaur', emoji: '🦕', labelColor: '#37a34a' } },
+  { char: 'E', color: 0x51cf66, word: { name: 'Elephant', emoji: '🐘', labelColor: '#7b8fc0' } },
 ];
 
-const POKES_TO_MORPH = 3;
-const PULLS_TO_MORPH = 2;
-const SPIN_TO_MORPH = 9.0;          // 累計回転量(ラジアン)
+const POKES_TO_ADVANCE = 3;
+const PULLS_TO_ADVANCE = 2;
+const SPIN_TO_ADVANCE = 9.0;        // 累計回転量(ラジアン)
 const PULL_COUNT_LEN = 1.1;         // これ以上引っぱって離すと1カウント
 const STORAGE_KEY = 'moji-henshin-land-progress';
 
@@ -73,6 +42,13 @@ fill.position.set(-4, -2, 6);
 scene.add(fill);
 
 const fx = new FxSystem(scene);
+
+let shakeMag = 0;
+const transformCtx = {
+  fx,
+  sfx,
+  shake: (m) => { shakeMag = Math.max(shakeMag, m); },
+};
 
 // ---------- UI要素 ----------
 const ui = {
@@ -178,7 +154,7 @@ stageGroup.add(shadow);
 const actor = {
   root: new THREE.Group(),      // 位置(引っぱり+ゆらゆら)
   spin: new THREE.Group(),      // 回転
-  content: null,                // いまの見た目(文字 or 変身先)
+  transform: null,              // 文字の変身コントローラ
   scl: new Spring(1),           // 出現ポップ用スケール
   sq: new Spring(0),            // ぷにぷに(縦つぶれ量)
   pull: new THREE.Vector2(),    // 引っぱりオフセット
@@ -189,28 +165,25 @@ const actor = {
 actor.root.add(actor.spin);
 stageGroup.add(actor.root);
 
-function setActorContent(group) {
-  if (actor.content) {
-    actor.spin.remove(actor.content);
-    actor.content.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
-      if (o.material) o.material.dispose();
-    });
-  }
-  actor.content = group;
-  actor.spin.add(group);
+function disposeTransform() {
+  if (!actor.transform) return;
+  actor.spin.remove(actor.transform.group);
+  actor.transform.group.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) o.material.dispose();
+  });
+  actor.transform = null;
 }
 
 // ---------- ゲーム状態 ----------
 const state = {
   mode: 'select',              // 'select' | 'stage'
   letterIndex: 0,
-  phase: 0,                    // 0=文字 1=ことば1 2=ことば2 3=できた!
+  phase: 0,                    // 0=つつく 1=引っぱる 2=回す 3=できた!
   pokes: 0,
   pulls: 0,
   spinAccum: 0,
   inputLocked: false,
-  morphToken: 0,
   lastInteraction: 0,
   clockT: 0,
 };
@@ -243,7 +216,8 @@ function hideWord() { ui.wordLabel.classList.remove('show'); }
 
 // ---------- 画面切り替え ----------
 function goSelect() {
-  state.morphToken++;
+  clearTweens();
+  disposeTransform();
   state.mode = 'select';
   selectGroup.visible = true;
   stageGroup.visible = false;
@@ -261,7 +235,8 @@ function goSelect() {
 }
 
 function enterStage(index) {
-  state.morphToken++;
+  clearTweens();
+  disposeTransform();
   state.mode = 'stage';
   state.letterIndex = index;
   state.phase = 0;
@@ -278,7 +253,8 @@ function enterStage(index) {
   hideWord();
 
   const info = LETTERS[index];
-  setActorContent(buildLetterMesh(info.char, info.color));
+  actor.transform = createTransform(info.char, info.color, transformCtx);
+  actor.spin.add(actor.transform.group);
   actor.scl.v = 0; actor.scl.target = 1; actor.scl.vel = 6;
   actor.sq.v = 0; actor.sq.vel = 0;
   actor.pull.set(0, 0); actor.pullVel.set(0, 0);
@@ -290,60 +266,21 @@ function enterStage(index) {
   updateCamera();
 }
 
-// ---------- 変身 ----------
-function morphTo(buildContent, { word = null, celebrate = false } = {}) {
-  state.inputLocked = true;
-  const token = ++state.morphToken;
-  hideWord();
-  sfx.whoosh();
-  actor.scl.target = 0;
-  actor.scl.vel = 2.5;
-  actor.sq.vel = -6;
-
-  setTimeout(() => {
-    if (token !== state.morphToken) return;
-    setActorContent(buildContent());
-    actor.pull.set(0, 0); actor.pullVel.set(0, 0);
-    actor.rotY = 0; actor.rotVelY = 0;
-    actor.scl.v = 0; actor.scl.target = 1; actor.scl.vel = 7;
-    sfx.pop();
-    sfx.sparkle();
-    fx.burst(new THREE.Vector3(0, 0, 0.6), 30);
-    if (word) showWord(word);
-    if (celebrate) {
-      sfx.tada();
-      fx.confetti(70, selectBounds.w);
-      ui.star.classList.add('show');
-      setTimeout(() => {
-        if (token !== state.morphToken) return;
-        ui.nextBtn.style.display = 'flex';
-      }, 700);
-    }
-    setTimeout(() => {
-      if (token !== state.morphToken) return;
-      state.inputLocked = false;
-      state.lastInteraction = state.clockT;
-    }, 450);
-  }, 420);
-}
-
-function advancePhase() {
+// ---------- できた! ----------
+function celebrate() {
   const info = LETTERS[state.letterIndex];
-  if (state.phase === 0) {
-    state.phase = 1;
-    morphTo(info.words[0].build, { word: info.words[0] });
-    setHint('pull');
-  } else if (state.phase === 1) {
-    state.phase = 2;
-    morphTo(info.words[1].build, { word: info.words[1] });
-    setHint('spin');
-  } else if (state.phase === 2) {
-    state.phase = 3;
-    progress[state.letterIndex] = true;
-    saveProgress();
-    morphTo(() => buildLetterMesh(info.char, info.color), { celebrate: true });
-    setHint(null);
-  }
+  progress[state.letterIndex] = true;
+  saveProgress();
+  showWord(info.word);
+  sfx.tada();
+  fx.confetti(70, selectBounds.w);
+  ui.star.classList.add('show');
+  setTimeout(() => {
+    if (state.mode !== 'stage' || state.phase !== 3) return;
+    ui.nextBtn.style.display = 'flex';
+  }, 700);
+  state.inputLocked = false;   // できたあとも つついてあそべる
+  state.lastInteraction = state.clockT;
 }
 
 // ---------- 入力 ----------
@@ -409,7 +346,7 @@ function onPointerMove(e) {
       pointer.lastStretchSfx = state.clockT;
     }
   } else {
-    // 回転:横方向の指の動きでくるくる(phase 2 で変身が進む)
+    // 回転:横方向の指の動きでくるくる(phase 2 で変身が完成する)
     const spin = dx * 0.02;
     actor.rotVelY += spin;
     if (state.phase === 2) {
@@ -418,7 +355,15 @@ function onPointerMove(e) {
         sfx.whirl();
         pointer.lastWhirlSfx = state.clockT;
       }
-      if (state.spinAccum >= SPIN_TO_MORPH) advancePhase();
+      if (state.spinAccum >= SPIN_TO_ADVANCE) {
+        state.phase = 3;
+        state.inputLocked = true;
+        setHint(null);
+        actor.rotVelY = 0;
+        // 正面をむいてからフィナーレ
+        actor.rotY = Math.round(actor.rotY / (Math.PI * 2)) * Math.PI * 2;
+        actor.transform.finale(celebrate);
+      }
     }
   }
 }
@@ -453,8 +398,13 @@ function onPointerUp(e) {
     if (len > PULL_COUNT_LEN) {
       state.pulls++;
       sfx.boing();
+      const dir = Math.sign(actor.pull.x) || 1;
       fx.burst(new THREE.Vector3(actor.pull.x, actor.pull.y, 0.6), 14, 3);
-      if (state.pulls >= PULLS_TO_MORPH) advancePhase();
+      actor.transform.pull(state.pulls, dir);
+      if (state.pulls >= PULLS_TO_ADVANCE) {
+        state.phase = 2;
+        setHint('spin');
+      }
     } else if (len > 0.3) {
       sfx.poyon();
     }
@@ -468,7 +418,11 @@ function onPointerUp(e) {
     fx.burst(new THREE.Vector3(pointer.world.x, pointer.world.y, 0.6), 10, 2.6, 0.6);
     if (state.phase === 0) {
       state.pokes++;
-      if (state.pokes >= POKES_TO_MORPH) advancePhase();
+      actor.transform.poke(state.pokes);
+      if (state.pokes >= POKES_TO_ADVANCE) {
+        state.phase = 1;
+        setHint('pull');
+      }
     }
   }
 }
@@ -521,7 +475,7 @@ function updateCamera() {
   const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
   const need = state.mode === 'select'
     ? { w: selectBounds.w, h: selectBounds.h }
-    : { w: 6.6, h: 7.6 };
+    : { w: 7.0, h: 7.8 };
   const zForH = need.h / 2 / Math.tan(halfFov);
   const zForW = need.w / 2 / Math.tan(halfFov) / camera.aspect;
   camera.position.z = Math.max(zForH, zForW);
@@ -540,6 +494,17 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
   state.clockT = t;
+
+  updateTweens(dt);
+
+  // 画面ゆれ(ドスン!)
+  if (shakeMag > 0.003) {
+    scene.position.x = (Math.random() - 0.5) * shakeMag * 2;
+    scene.position.y = (Math.random() - 0.5) * shakeMag * 2;
+    shakeMag *= Math.exp(-5 * dt);
+  } else {
+    scene.position.set(0, 0, 0);
+  }
 
   // ただよう粒
   const ap = ambientGeo.getAttribute('position');
@@ -604,8 +569,8 @@ function animate() {
     actor.spin.rotation.z = -actor.pull.x * 0.08;
     actor.spin.rotation.x = actor.pull.y * 0.06;
 
-    // アイドルアニメ
-    if (actor.content && actor.content.userData.tick) actor.content.userData.tick(t);
+    // 変身コントローラの継続アニメ
+    if (actor.transform) actor.transform.tick(t, dt);
 
     // 影
     const shScale = Math.max(0.2, s * (1 - (actor.pull.y + bobY) * 0.12));

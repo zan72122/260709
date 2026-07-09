@@ -1,7 +1,9 @@
-// A〜E の立体文字メッシュ。フォント不要で THREE.Shape から押し出して作る。
+// A〜E の立体文字。フォント不要で THREE.Shape から押し出して作る。
+// buildLetterParts() は「形状座標系」(shapeSpace) を公開し、
+// 変身パーツを文字の輪郭とぴったり合わせて追加できるようにする。
 import * as THREE from 'three';
 
-const EXTRUDE = {
+export const LETTER_EXTRUDE = {
   depth: 0.5,
   bevelEnabled: true,
   bevelThickness: 0.1,
@@ -9,6 +11,10 @@ const EXTRUDE = {
   bevelSegments: 3,
   curveSegments: 24,
 };
+
+export const C_GAP_ANGLE = 0.62;   // Cの口の開き角(ラジアン)
+export const C_OUTER_R = 1.0;
+export const C_INNER_R = 0.52;
 
 function poly(points) {
   const s = new THREE.Shape();
@@ -54,10 +60,20 @@ function shapeB() {
 }
 
 function shapeC() {
-  const a0 = 0.62;               // 口の開き角(ラジアン)
+  const a0 = C_GAP_ANGLE;
   const s = new THREE.Shape();
-  s.absarc(0, 0, 1.0, a0, Math.PI * 2 - a0, false);
-  s.absarc(0, 0, 0.52, Math.PI * 2 - a0, a0, true);
+  s.absarc(0, 0, C_OUTER_R, a0, Math.PI * 2 - a0, false);
+  s.absarc(0, 0, C_INNER_R, Math.PI * 2 - a0, a0, true);
+  s.closePath();
+  return s;
+}
+
+// Cの欠け(かじられたところ)を埋める扇形ピース
+export function shapeCWedge() {
+  const a0 = C_GAP_ANGLE + 0.02;   // わずかに重ねて隙間を消す
+  const s = new THREE.Shape();
+  s.absarc(0, 0, C_OUTER_R, -a0, a0, false);
+  s.absarc(0, 0, C_INNER_R, a0, -a0, true);
   s.closePath();
   return s;
 }
@@ -89,17 +105,29 @@ function shapeE() {
 
 const SHAPES = { A: shapeA, B: shapeB, C: shapeC, D: shapeD, E: shapeE };
 
-export function buildLetterMesh(char, color) {
-  const shape = SHAPES[char]();
-  const geo = new THREE.ExtrudeGeometry(shape, EXTRUDE);
-  geo.center();
-  const mat = new THREE.MeshStandardMaterial({
-    color,
-    roughness: 0.45,
-    metalness: 0.05,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
+export function letterShape(char) {
+  return SHAPES[char]();
+}
+
+export function letterMaterial(color) {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.05 });
+}
+
+// group: 中央寄せ済みの外側 / shapeSpace: 形状座標系(パーツ合わせ用) / mesh, material
+export function buildLetterParts(char, color) {
+  const geo = new THREE.ExtrudeGeometry(letterShape(char), LETTER_EXTRUDE);
+  geo.computeBoundingBox();
+  const c = geo.boundingBox.getCenter(new THREE.Vector3());
+  const material = letterMaterial(color);
+  const mesh = new THREE.Mesh(geo, material);
+  const shapeSpace = new THREE.Group();
+  shapeSpace.position.set(-c.x, -c.y, -c.z);
+  shapeSpace.add(mesh);
   const group = new THREE.Group();
-  group.add(mesh);
-  return group;
+  group.add(shapeSpace);
+  return { group, shapeSpace, mesh, material, center: c };
+}
+
+export function buildLetterMesh(char, color) {
+  return buildLetterParts(char, color).group;
 }
