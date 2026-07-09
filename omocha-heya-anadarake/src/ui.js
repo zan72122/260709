@@ -52,6 +52,16 @@ export class UI {
 
     this.finger = this._el('div', 'hint-finger hidden', '👆', this.hud);
 
+    // edge markers: point at off-screen toys so a zoomed-in camera
+    // never leaves a pre-reader lost
+    this.markers = [];
+    for (let i = 0; i < 3; i++) {
+      const m = this._el('div', 'edge-marker hidden', '', this.hud);
+      const arrow = this._el('span', 'em-arrow', '➤', m);
+      const icon = this._el('span', 'em-icon', '🧸', m);
+      this.markers.push({ root: m, arrow, icon });
+    }
+
     // ---- reset confirm (broom = start over?)
     this.confirm = this._el('div', 'screen confirm-screen hidden');
     const card = this._el('div', 'confirm-card', '', this.confirm);
@@ -96,6 +106,20 @@ export class UI {
 
   showHint(v) {
     this.finger.classList.toggle('hidden', !v);
+  }
+
+  // items: [{xPct, yPct, deg, emoji}] — at most markers.length entries
+  updateMarkers(items) {
+    for (let i = 0; i < this.markers.length; i++) {
+      const m = this.markers[i];
+      const it = items[i];
+      if (!it) { m.root.classList.add('hidden'); continue; }
+      m.root.classList.remove('hidden');
+      m.root.style.left = it.xPct + '%';
+      m.root.style.top = it.yPct + '%';
+      m.arrow.style.transform = `rotate(${it.deg}deg) translateX(23px)`;
+      if (m.icon.textContent !== it.emoji) m.icon.textContent = it.emoji;
+    }
   }
 
   showCelebrate(crowns) {

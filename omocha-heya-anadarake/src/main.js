@@ -119,12 +119,70 @@ const ui = new UI(document.getElementById('ui'), {
   },
 });
 
+// ------------------------------------------------------------ camera v3
+// The camera lives with the hole: close while the hole is small (falls fill
+// the screen), pulling back as it grows. Two fingers orbit & pinch-zoom.
+const cam = {
+  az: 0,                                    // horizontal orbit, radians
+  el: THREE.MathUtils.degToRad(40),         // 25°..60°
+  zoom: 1,                                  // pinch multiplier 0.6..1.6
+  dist: 12,                                 // smoothed actual distance
+  autoAz: 0,                                // slow orbit on title/celebrate
+};
+const EL_MIN = THREE.MathUtils.degToRad(25);
+const EL_MAX = THREE.MathUtils.degToRad(60);
+
+function fitCamera() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.fov = 48;
+  camera.userData.portrait = camera.aspect < 0.9;
+  camera.updateProjectionMatrix();
+}
+
+const camTarget = new THREE.Vector3(0, 0, 2.5);
+function updateCamera(dt) {
+  const playing = state.mode === 'game';
+  const h = state.engine ? state.engine.hole : { x: 0, z: 0, r: 0.5 };
+
+  let az, el, wantDist, lookY;
+  if (playing) {
+    camTarget.x += (h.x - camTarget.x) * Math.min(1, 4.5 * dt);
+    camTarget.z += (h.z - camTarget.z) * Math.min(1, 4.5 * dt);
+    az = cam.az; el = cam.el;
+    wantDist = (6.6 + h.r * 3.4) * cam.zoom * (camera.userData.portrait ? 1.35 : 1);
+  } else {
+    // title / celebration: drift around the whole room
+    cam.autoAz += dt * 0.1;
+    camTarget.x += (0 - camTarget.x) * Math.min(1, 2 * dt);
+    camTarget.z += (0.5 - camTarget.z) * Math.min(1, 2 * dt);
+    az = cam.autoAz; el = THREE.MathUtils.degToRad(38);
+    wantDist = camera.userData.portrait ? 24 : 19;
+  }
+  cam.dist += (THREE.MathUtils.clamp(wantDist, 4.5, 26) - cam.dist) * Math.min(1, 3 * dt);
+
+  const sx = (Math.random() - 0.5) * state.shake;
+  const sy = (Math.random() - 0.5) * state.shake;
+  const ce = Math.cos(el), se = Math.sin(el);
+  camera.position.set(
+    camTarget.x + Math.sin(az) * ce * cam.dist + sx,
+    se * cam.dist + sy,
+    camTarget.z + Math.cos(az) * ce * cam.dist
+  );
+  camera.lookAt(camTarget.x, 0.45, camTarget.z);
+  state.shake *= Math.exp(-6 * dt);
+}
+window.addEventListener('resize', fitCamera);
+fitCamera();
+
 // ------------------------------------------------------------ input
+// one finger: move the hole. two fingers: orbit + pinch (hole move cancels).
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const hitPoint = new THREE.Vector3();
 let pointerDown = false;
+const touches = new Map();
+let gesture = null;
 
 function pointToFloor(clientX, clientY) {
   ndc.x = (clientX / window.innerWidth) * 2 - 1;
@@ -137,9 +195,24 @@ function pointToFloor(clientX, clientY) {
   return false;
 }
 
+function gestureFrom() {
+  const [a, b] = [...touches.values()];
+  return {
+    cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2,
+    span: Math.hypot(a.x - b.x, a.y - b.y),
+    az0: cam.az, el0: cam.el, zoom0: cam.zoom,
+  };
+}
+
 canvas.addEventListener('pointerdown', (e) => {
   audio.unlock();
   if (state.mode !== 'game') return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size >= 2) {
+    pointerDown = false;             // second finger: switch to camera mode
+    gesture = gestureFrom();
+    return;
+  }
   pointerDown = true;
   if (pointToFloor(e.clientX, e.clientY)) audio.tap();
   state.idleT = 0;
@@ -147,61 +220,31 @@ canvas.addEventListener('pointerdown', (e) => {
   ui.showHint(false);
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (!pointerDown || state.mode !== 'game') return;
+  if (state.mode !== 'game') return;
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (gesture && touches.size >= 2) {
+    const g = gestureFrom();
+    cam.az = gesture.az0 - (g.cx - gesture.cx) * 0.008;
+    cam.el = THREE.MathUtils.clamp(gesture.el0 + (g.cy - gesture.cy) * 0.005, EL_MIN, EL_MAX);
+    cam.zoom = THREE.MathUtils.clamp(gesture.zoom0 * (gesture.span / Math.max(20, g.span)), 0.6, 1.6);
+    state.idleT = 0;
+    return;
+  }
+  if (!pointerDown) return;
   pointToFloor(e.clientX, e.clientY);
   state.idleT = 0;
 });
-window.addEventListener('pointerup', () => { pointerDown = false; });
-window.addEventListener('pointercancel', () => { pointerDown = false; });
-
-// ------------------------------------------------------------ camera
-function fitCamera() {
-  const aspect = window.innerWidth / window.innerHeight;
-  camera.aspect = aspect;
-  const portrait = aspect < 0.9;
-  camera.fov = portrait ? 58 : 48;
-  const vfov = THREE.MathUtils.degToRad(camera.fov);
-  const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
-  // landscape: frame the whole room. portrait: frame a vertical slice and
-  // let the camera follow the hole horizontally instead.
-  const visW = portrait ? 7.2 : ROOM_W / 2 + 1.2;
-  const visD = ROOM_D / 2 + (portrait ? 1.6 : 1.9);
-  const distW = visW / Math.tan(hfov / 2);
-  const distD = visD / Math.tan(vfov / 2);
-  camera.userData.dist = Math.max(distW, distD, 11);
-  camera.userData.lookZ = portrait ? -0.9 : 0.6;
-  // how far the camera may pan so the whole room stays reachable
-  const seenHalfW = Math.tan(hfov / 2) * camera.userData.dist;
-  camera.userData.panX = Math.max(0, ROOM_W / 2 + 1.0 - seenHalfW);
-  camera.updateProjectionMatrix();
+function dropPointer(e) {
+  touches.delete(e.pointerId);
+  if (touches.size < 2) gesture = null;
+  if (touches.size === 0) pointerDown = false;
 }
-
-const camTarget = new THREE.Vector3(0, 0, 0.6);
-const camLook = new THREE.Vector3();
-function updateCamera(dt) {
-  const h = state.engine ? state.engine.hole : { x: 0, z: 0 };
-  const panX = camera.userData.panX || 0;
-  const strength = panX > 0.5 ? 1.0 : 0.14;   // portrait: really follow
-  camLook.set(
-    THREE.MathUtils.clamp(h.x * strength, -panX - 0.6, panX + 0.6),
-    0,
-    (camera.userData.lookZ ?? 0.6) + h.z * 0.12
-  );
-  camTarget.lerp(camLook, Math.min(1, 3 * dt));
-  const el = THREE.MathUtils.degToRad(40);   // lower, so height reads clearly
-  const d = camera.userData.dist || 18;
-  const sx = (Math.random() - 0.5) * state.shake;
-  const sy = (Math.random() - 0.5) * state.shake;
-  camera.position.set(
-    camTarget.x + sx,
-    Math.sin(el) * d + sy,
-    camTarget.z + Math.cos(el) * d
-  );
-  camera.lookAt(camTarget.x, 0.4, camTarget.z);
-  state.shake *= Math.exp(-6 * dt);
-}
-window.addEventListener('resize', fitCamera);
-fitCamera();
+window.addEventListener('pointerup', dropPointer);
+window.addEventListener('pointercancel', dropPointer);
+// desktop convenience: wheel zooms
+window.addEventListener('wheel', (e) => {
+  cam.zoom = THREE.MathUtils.clamp(cam.zoom * (1 + e.deltaY * 0.001), 0.6, 1.6);
+}, { passive: true });
 
 // ------------------------------------------------------------ events → juice
 function handleEvents(eng) {
@@ -331,6 +374,47 @@ function handleEvents(eng) {
   eng.events.length = 0;
 }
 
+// ------------------------------------------------------------ edge markers
+// point at off-screen toys so the zoomed-in camera never loses the child
+const markerVec = new THREE.Vector3();
+function emojiFor(p) {
+  if (p.desc.walker) return p.desc.kind === 'hen' ? '🐔' : '🐤';
+  if (p.desc.balloon) return '🎈';
+  if (p.desc.waterSource) return '🛁';
+  return '🧸';
+}
+function updateEdgeMarkers() {
+  if (state.mode !== 'game') { ui.updateMarkers([]); return; }
+  const eng = state.engine;
+  const cands = [];
+  for (const e of state.entries) {
+    const p = e.prop;
+    if (p.state === S.GONE || p.desc.fixture || p.supportId) continue;
+    markerVec.set(p.x, 0.4, p.z).project(camera);
+    let nx = markerVec.x, ny = markerVec.y;
+    const behind = markerVec.z > 1;
+    if (behind) { nx = -nx; ny = -ny; }
+    if (!behind && Math.abs(nx) < 1.02 && Math.abs(ny) < 1.02) continue;
+    const d = Math.hypot(p.x - eng.hole.x, p.z - eng.hole.z);
+    cands.push({ p, nx, ny, d });
+  }
+  cands.sort((a, b) => a.d - b.d);
+  const items = [];
+  for (const c of cands.slice(0, 3)) {
+    // clamp the direction vector to the screen rectangle edge
+    const k = 0.84 / Math.max(Math.abs(c.nx), Math.abs(c.ny), 0.01);
+    const ex = c.nx * Math.min(k, 1);
+    const ey = c.ny * Math.min(k, 1);
+    items.push({
+      xPct: (ex * 0.5 + 0.5) * 100,
+      yPct: (1 - (ey * 0.5 + 0.5)) * 100,
+      deg: Math.atan2(-c.ny, c.nx) * 180 / Math.PI,
+      emoji: emojiFor(c.p),
+    });
+  }
+  ui.updateMarkers(items);
+}
+
 // escaped balloons drifting up to the ceiling
 const flyingBalloons = [];
 function updateBalloons(dt) {
@@ -458,6 +542,7 @@ function tick() {
   effects.update(dt);
   updateBalloons(dt);
   updateCamera(dt);
+  updateEdgeMarkers();
   if (lastW !== window.innerWidth || lastH !== window.innerHeight) {
     lastW = window.innerWidth; lastH = window.innerHeight;
     renderer.setSize(lastW, lastH, false);
@@ -471,4 +556,4 @@ ui.showTitle();
 tick();
 
 // debug / test hook (harmless in production)
-window.__game = { state, ui, audio };
+window.__game = { state, ui, audio, cam };
