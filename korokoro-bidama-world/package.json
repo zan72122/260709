@@ -1,0 +1,11 @@
+{
+  "name": "korokoro-bidama-world",
+  "version": "1.0.0",
+  "description": "ころころ びーだまワールド — Marble World inspired 3D marble-run playground for small kids",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node test/physics-test.mjs && node test/course-test.mjs"
+  }
+}
