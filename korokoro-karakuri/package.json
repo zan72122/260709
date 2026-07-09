@@ -1,0 +1,11 @@
+{
+  "name": "korokoro-karakuri",
+  "version": "1.0.0",
+  "description": "コロコロからくり — Automatoys風の木のおもちゃ3Dからくり装置。4歳児向け、iPhone/iPad 縦横対応。",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node test/layout.test.mjs && node test/physics.test.mjs && node test/audio.test.mjs && node test/smoke.mjs"
+  }
+}
