@@ -1,0 +1,11 @@
+{
+  "name": "kirakira-yousei-magic",
+  "version": "1.0.0",
+  "description": "キラキラ☆ようせいマジック にじいろガーデン — fairy-magic 3D garden for small kids (iPhone/iPad, portrait & landscape)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node test/smoke.mjs"
+  }
+}

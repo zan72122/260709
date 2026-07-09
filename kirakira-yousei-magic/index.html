@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>キラキラ☆ようせいマジック にじいろガーデン</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#ffb8d9">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧚</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden; position: fixed;
+    touch-action: none; overscroll-behavior: none;
+    font-family: "Hiragino Maru Gothic ProN", "BIZ UDPGothic", "Yu Gothic", system-ui, sans-serif;
+    background: #ffd9ec;
+    user-select: none; -webkit-user-select: none;
+  }
+  #game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #ui { position: absolute; inset: 0; pointer-events: none; }
+  .hidden { display: none !important; }
+
+  /* ---------- title ---------- */
+  .screen {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px;
+    pointer-events: auto; text-align: center;
+    padding: max(20px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+  }
+  .title-screen { background: radial-gradient(ellipse at 50% 38%, rgba(255,255,255,0.18), rgba(255,170,215,0.34)); }
+  .game-title {
+    font-size: clamp(24px, 6.5vw, 56px); font-weight: 800; line-height: 1.35; color: #d94f8f;
+    word-break: keep-all;
+    text-shadow: 0 3px 0 #fff, 0 8px 22px rgba(230,110,170,0.5);
+    animation: bob 2.6s ease-in-out infinite;
+  }
+  .game-title .line2 { display: block; font-size: 0.72em; color: #9d5fd0; }
+  .game-sub { font-size: clamp(15px, 4vw, 22px); color: #b05fa8; text-shadow: 0 2px 0 #fff; }
+  @keyframes bob { 0%,100% { transform: translateY(0) rotate(-1.2deg); } 50% { transform: translateY(-10px) rotate(1.2deg); } }
+
+  .big-btn {
+    pointer-events: auto; border: none; cursor: pointer;
+    font-family: inherit; font-weight: 800; white-space: nowrap;
+    font-size: clamp(20px, 5.4vw, 32px); color: #fff;
+    padding: 18px 42px; border-radius: 999px;
+    background: linear-gradient(180deg, #ffa1c0, #ff6d9d);
+    box-shadow: 0 6px 0 #d94f7f, 0 14px 26px rgba(220,90,140,0.45);
+    transition: transform 0.1s;
+  }
+  .big-btn:active { transform: translateY(4px) scale(0.97); box-shadow: 0 2px 0 #d94f7f; }
+  .big-btn.violet { background: linear-gradient(180deg, #c9a0f5, #9d76ea); box-shadow: 0 6px 0 #7a55c8, 0 14px 26px rgba(150,110,220,0.45); }
+  .big-btn.violet:active { box-shadow: 0 2px 0 #7a55c8; }
+
+  /* ---------- select hint ---------- */
+  #select-hint {
+    position: absolute; top: max(18px, env(safe-area-inset-top)); left: 0; right: 0;
+    text-align: center; pointer-events: none;
+    font-size: clamp(18px, 5vw, 30px); font-weight: 800; color: #d94f8f;
+    text-shadow: 0 2px 0 #fff, 0 6px 16px rgba(230,110,170,0.4);
+    animation: bob 2.2s ease-in-out infinite;
+  }
+
+  /* ---------- HUD ---------- */
+  #hud { position: absolute; inset: 0; pointer-events: none; }
+  #meter {
+    position: absolute; top: max(12px, env(safe-area-inset-top)); left: 12px;
+    display: flex; gap: 3px; flex-wrap: wrap; max-width: 62vw;
+    background: rgba(255,255,255,0.72); border-radius: 999px; padding: 7px 13px;
+    box-shadow: 0 4px 12px rgba(220,120,170,0.3);
+  }
+  #meter .slot { font-size: clamp(16px, 4.5vw, 24px); filter: grayscale(1) opacity(0.35); transition: filter 0.3s, transform 0.3s; }
+  #meter .slot.on { filter: none; transform: scale(1.15); }
+  #gem-badge {
+    position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px;
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.72); border-radius: 999px; padding: 7px 15px;
+    font-size: clamp(17px, 4.5vw, 24px); font-weight: 800; color: #c98a1f;
+    box-shadow: 0 4px 12px rgba(220,120,170,0.3);
+  }
+  #gem-badge.pop { animation: pop 0.35s ease; }
+  @keyframes pop { 40% { transform: scale(1.25); } 100% { transform: scale(1); } }
+
+  .side-btns {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 14px; pointer-events: none;
+  }
+  .round-btn {
+    pointer-events: auto; border: none; cursor: pointer;
+    width: clamp(52px, 13vw, 68px); height: clamp(52px, 13vw, 68px);
+    border-radius: 50%; font-size: clamp(24px, 6.5vw, 34px);
+    background: rgba(255,255,255,0.85);
+    box-shadow: 0 4px 0 rgba(220,140,180,0.55), 0 8px 18px rgba(220,120,170,0.35);
+    transition: transform 0.1s;
+  }
+  .round-btn:active { transform: translateY(3px) scale(0.95); box-shadow: 0 1px 0 rgba(220,140,180,0.55); }
+
+  /* ---------- banners ---------- */
+  #banner {
+    position: absolute; top: 26%; left: 0; right: 0; text-align: center; pointer-events: none;
+  }
+  #banner.anim { animation: bannerIn 0.55s cubic-bezier(0.2, 1.6, 0.4, 1); }
+  @keyframes bannerIn { 0% { transform: scale(0.2); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  .banner-emoji { font-size: clamp(44px, 13vw, 90px); }
+  .banner-text {
+    font-size: clamp(24px, 7vw, 46px); font-weight: 800; color: #d94f8f;
+    text-shadow: 0 3px 0 #fff, 0 8px 20px rgba(230,110,170,0.5);
+  }
+  #praise {
+    position: absolute; top: 15%; left: 0; right: 0; text-align: center; pointer-events: none;
+    font-size: clamp(20px, 6vw, 36px); font-weight: 800; color: #ff8a2b;
+    text-shadow: 0 2px 0 #fff, 0 6px 14px rgba(255,150,60,0.45);
+  }
+  #praise.anim { animation: praiseIn 1.5s ease; }
+  @keyframes praiseIn {
+    0% { transform: translateY(18px) scale(0.4); opacity: 0; }
+    20% { transform: translateY(0) scale(1.1); opacity: 1; }
+    80% { opacity: 1; } 100% { opacity: 0; }
+  }
+
+  /* ---------- wipe transition ---------- */
+  #wipe {
+    position: absolute; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(circle at 50% 50%, #fff 0%, #ffe9f4 45%, #ffd0e8 100%);
+  }
+  #wipe.in { animation: wipeIn 0.75s ease forwards; }
+  #wipe.out { animation: wipeOut 0.7s ease forwards; }
+  @keyframes wipeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes wipeOut { from { opacity: 1; } to { opacity: 0; } }
+
+  /* ---------- emoji rain ---------- */
+  #emoji-rain { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  #emoji-rain .drop {
+    position: absolute; top: -50px;
+    animation-name: fall; animation-timing-function: linear; animation-fill-mode: forwards;
+  }
+  @keyframes fall {
+    to { transform: translateY(115vh) rotate(340deg); }
+  }
+
+  /* ---------- finale ---------- */
+  .finale-screen { background: radial-gradient(ellipse at 50% 40%, rgba(255,255,255,0.25), rgba(255,190,230,0.45)); }
+  .finale-title {
+    font-size: clamp(28px, 8vw, 56px); font-weight: 800; color: #d94f8f; line-height: 1.4;
+    text-shadow: 0 3px 0 #fff, 0 8px 22px rgba(230,110,170,0.5);
+    animation: bob 2.4s ease-in-out infinite;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="ui">
+  <div id="wipe" class="hidden"></div>
+  <div id="emoji-rain"></div>
+
+  <div id="title-screen" class="screen title-screen">
+    <div class="game-title">キラキラ☆ようせいマジック<span class="line2">にじいろガーデン 🧚🌈</span></div>
+    <div class="game-sub">タップで まほうを かけよう！</div>
+    <button id="btn-start" class="big-btn">▶ はじめる</button>
+  </div>
+
+  <div id="select-hint" class="hidden">すきな ようせいを タッチしてね 💖</div>
+
+  <div id="hud" class="hidden">
+    <div id="meter"></div>
+    <div id="gem-badge">⭐ <span id="gem-count">0</span></div>
+    <div class="side-btns">
+      <button id="btn-sound" class="round-btn">🔊</button>
+      <button id="btn-dress" class="round-btn">🎀</button>
+      <button id="btn-home" class="round-btn">🏠</button>
+    </div>
+  </div>
+
+  <div id="banner" class="hidden"></div>
+  <div id="praise" class="hidden"></div>
+
+  <div id="finale-screen" class="screen finale-screen hidden">
+    <div class="finale-title">🎉 ぜんぶ クリア！ 🎉<br>ようせいマジック マスター！</div>
+    <button id="btn-party" class="big-btn">🎆 はなび パーティー！</button>
+    <button id="btn-again" class="big-btn violet">🏠 さいしょから</button>
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
