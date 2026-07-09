@@ -1,0 +1,11 @@
+{
+  "name": "omocha-heya-anadarake",
+  "version": "1.0.0",
+  "description": "おもちゃのへや あなだらけ! — Donut-County-style hole sandbox for small kids on iPhone/iPad",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node test/physics-test.mjs && node test/smoke.mjs"
+  }
+}
