@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>みずのふしぎキッチン</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#bfe6f2">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🫧</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden; position: fixed;
+    touch-action: none; overscroll-behavior: none;
+    font-family: "Hiragino Maru Gothic ProN", "BIZ UDPGothic", "Yu Gothic", system-ui, sans-serif;
+    background: #cfe9f2;
+    user-select: none; -webkit-user-select: none;
+  }
+  #game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #ui { position: absolute; inset: 0; pointer-events: none; }
+  .hidden { display: none !important; }
+
+  /* ============================================================ title */
+  #title-screen {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px;
+    pointer-events: auto; text-align: center;
+    padding: max(20px, env(safe-area-inset-top)) 24px max(28px, env(safe-area-inset-bottom));
+    background:
+      radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.55), rgba(160,215,235,0.55) 70%),
+      linear-gradient(180deg, rgba(190,230,245,0.75), rgba(255,240,214,0.8));
+    backdrop-filter: blur(2px);
+    transition: opacity 0.6s ease;
+  }
+  #title-screen.fade-out { opacity: 0; pointer-events: none; }
+  .title-emoji { font-size: clamp(52px, 15vw, 104px); line-height: 1; letter-spacing: 0.06em; }
+  .title-emoji span { display: inline-block; animation: bob 2.4s ease-in-out infinite; }
+  .title-emoji span:nth-child(2) { animation-delay: 0.3s; }
+  .title-emoji span:nth-child(3) { animation-delay: 0.6s; }
+  @keyframes bob {
+    0%, 100% { transform: translateY(0) rotate(-3deg); }
+    50% { transform: translateY(-14px) rotate(3deg); }
+  }
+  .game-title {
+    font-size: clamp(30px, 8.6vw, 60px); font-weight: 800; line-height: 1.35;
+    color: #1e6e8c; word-break: keep-all;
+    text-shadow: 0 3px 0 #fff, 0 8px 22px rgba(40,130,170,0.35);
+  }
+  .game-sub {
+    font-size: clamp(15px, 4.2vw, 22px); font-weight: 700; color: #3a89a4;
+    text-shadow: 0 2px 0 #fff;
+  }
+  .big-btn {
+    pointer-events: auto; border: none; cursor: pointer; font-family: inherit;
+    font-size: clamp(22px, 6vw, 34px); font-weight: 800; color: #fff;
+    padding: 0.6em 1.6em; border-radius: 999px;
+    background: linear-gradient(180deg, #ffb14e, #f4802e);
+    box-shadow: 0 6px 0 #c8611e, 0 12px 26px rgba(200,100,30,0.45);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  .big-btn:active { transform: translateY(5px); box-shadow: 0 1px 0 #c8611e, 0 4px 12px rgba(200,100,30,0.4); }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+  .hint {
+    font-size: clamp(12px, 3.4vw, 16px); color: #56808f; font-weight: 700;
+    text-shadow: 0 1px 0 #fff;
+  }
+
+  /* ============================================================ HUD */
+  /* --- じょうたい ピル (左上) */
+  #phase-pill {
+    position: absolute; top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left));
+    display: flex; align-items: center; gap: 8px;
+    font-size: clamp(15px, 4vw, 21px); font-weight: 800; color: #1e6e8c;
+    background: rgba(255,255,255,0.88);
+    border-radius: 999px; padding: 8px 18px;
+    box-shadow: 0 4px 14px rgba(30,90,120,0.25);
+  }
+  #phase-pill .pp-icon { font-size: 1.25em; }
+  #phase-pill.pop { animation: pop 0.45s ease; }
+  @keyframes pop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.22) rotate(-3deg); }
+    100% { transform: scale(1); }
+  }
+
+  /* --- 右上ボタン */
+  #top-buttons {
+    position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right));
+    display: flex; gap: 10px;
+  }
+  .round-btn {
+    pointer-events: auto; border: none; cursor: pointer;
+    width: clamp(44px, 11vw, 56px); height: clamp(44px, 11vw, 56px);
+    border-radius: 50%; font-size: clamp(20px, 5.4vw, 27px);
+    background: rgba(255,255,255,0.88);
+    box-shadow: 0 4px 12px rgba(30,90,120,0.25);
+    transition: transform 0.1s ease;
+  }
+  .round-btn:active { transform: scale(0.88); }
+
+  /* --- バナー (中央上) */
+  #banner {
+    position: absolute; top: 16%; left: 50%;
+    display: flex; align-items: center; gap: 12px;
+    font-size: clamp(22px, 6.6vw, 44px); font-weight: 800; color: #fff;
+    background: linear-gradient(180deg, rgba(60,170,210,0.95), rgba(30,130,175,0.95));
+    padding: 0.45em 1em; border-radius: 999px; white-space: nowrap;
+    box-shadow: 0 8px 26px rgba(20,100,140,0.45), inset 0 2px 0 rgba(255,255,255,0.45);
+    text-shadow: 0 2px 0 rgba(0,60,90,0.35);
+    transform: translate(-50%, -30px) scale(0.6);
+    opacity: 0; transition: transform 0.4s cubic-bezier(0.2, 1.6, 0.4, 1), opacity 0.35s ease;
+    pointer-events: none;
+  }
+  #banner.show { transform: translate(-50%, 0) scale(1); opacity: 1; }
+  #banner .bn-emoji { font-size: 1.2em; animation: spinbob 1.2s ease-in-out infinite; }
+  @keyframes spinbob { 0%,100% { transform: rotate(-12deg); } 50% { transform: rotate(12deg) scale(1.2); } }
+
+  /* --- 温度計 (左) */
+  #thermometer {
+    position: absolute; left: max(14px, env(safe-area-inset-left));
+    bottom: calc(max(20px, env(safe-area-inset-bottom)) + clamp(96px, 20vh, 130px));
+    width: clamp(30px, 7vw, 40px); height: clamp(150px, 30vh, 240px);
+    pointer-events: none;
+  }
+  #thermo-tube {
+    position: absolute; inset: 0 28%; border-radius: 999px;
+    background: rgba(255,255,255,0.85);
+    box-shadow: inset 0 2px 8px rgba(40,90,110,0.3), 0 4px 12px rgba(30,90,120,0.25);
+    overflow: hidden;
+  }
+  #thermo-fill {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 30%;
+    background: linear-gradient(180deg, #58c2ee, #3aa5d8);
+    border-radius: 999px 999px 0 0;
+    transition: height 0.3s ease;
+  }
+  #thermo-face {
+    position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
+    font-size: clamp(26px, 7vw, 38px);
+    filter: drop-shadow(0 3px 6px rgba(30,90,120,0.4));
+  }
+  #thermo-digit {
+    position: absolute; top: -1.6em; left: 50%; transform: translateX(-50%);
+    font-size: clamp(13px, 3.6vw, 17px); font-weight: 800; color: #1e6e8c;
+    background: rgba(255,255,255,0.85); border-radius: 999px; padding: 2px 10px;
+    box-shadow: 0 3px 8px rgba(30,90,120,0.2);
+  }
+
+  /* --- 温度レバー (下) */
+  #lever-wrap {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: max(20px, env(safe-area-inset-bottom));
+    width: min(88%, 560px);
+    display: flex; align-items: center; gap: clamp(8px, 2vw, 14px);
+    pointer-events: none;
+  }
+  .end-btn {
+    pointer-events: auto; border: none; cursor: pointer;
+    width: clamp(54px, 13vw, 72px); height: clamp(54px, 13vw, 72px);
+    border-radius: 50%; font-size: clamp(26px, 6.6vw, 36px);
+    box-shadow: 0 5px 0 rgba(0,0,0,0.18), 0 10px 20px rgba(30,90,120,0.3);
+    transition: transform 0.1s ease;
+  }
+  .end-btn:active { transform: scale(0.88); }
+  #btn-cold { background: linear-gradient(180deg, #bfeaff, #74c8ef); }
+  #btn-hot { background: linear-gradient(180deg, #ffd39a, #ff9147); }
+  #lever-track {
+    pointer-events: auto; position: relative; flex: 1;
+    height: clamp(34px, 8.4vw, 46px); border-radius: 999px;
+    background: linear-gradient(90deg, #a8dcf5, #d8f0f8 35%, #ffe1b8 70%, #ffb070);
+    box-shadow: inset 0 3px 10px rgba(30,80,110,0.35), 0 6px 18px rgba(30,90,120,0.3);
+    touch-action: none;
+  }
+  #lever-fill {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 30%;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0.08));
+    pointer-events: none;
+  }
+  #lever-knob {
+    position: absolute; top: 50%; left: 30%;
+    transform: translate(-50%, -50%);
+    width: clamp(56px, 14vw, 76px); height: clamp(56px, 14vw, 76px);
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #ffffff, #dff2fb 60%, #b8dcec);
+    box-shadow: 0 6px 0 rgba(60,120,150,0.35), 0 10px 22px rgba(30,90,120,0.4);
+    display: flex; align-items: center; justify-content: center;
+    font-size: clamp(26px, 7vw, 38px);
+    pointer-events: none;
+    transition: left 0.05s linear;
+  }
+
+  /* --- 紙ふぶき */
+  #confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .confetto {
+    position: absolute; top: -40px;
+    animation: fall linear forwards;
+  }
+  @keyframes fall {
+    0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+    85% { opacity: 1; }
+    100% { transform: translateY(110vh) rotate(540deg); opacity: 0; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="ui">
+  <div id="confetti"></div>
+
+  <div id="hud" class="hidden">
+    <div id="phase-pill"><span class="pp-icon">💧</span>みず</div>
+    <div id="top-buttons">
+      <button class="round-btn" id="btn-mute" data-muted="0">🔊</button>
+      <button class="round-btn" id="btn-reset">🚰</button>
+    </div>
+    <div id="banner" class="hidden"></div>
+    <div id="thermometer">
+      <div id="thermo-digit">20°</div>
+      <div id="thermo-tube"><div id="thermo-fill"></div></div>
+      <div id="thermo-face">😊</div>
+    </div>
+    <div id="lever-wrap">
+      <button class="end-btn" id="btn-cold">❄️</button>
+      <div id="lever-track">
+        <div id="lever-fill"></div>
+        <div id="lever-knob">💧</div>
+      </div>
+      <button class="end-btn" id="btn-hot">🔥</button>
+    </div>
+  </div>
+
+  <div id="title-screen">
+    <div class="title-emoji"><span>🧊</span><span>💧</span><span>☁️</span></div>
+    <div class="game-title">みずの ふしぎ<br>キッチン</div>
+    <div class="game-sub">こおる・とける・わきあがる!</div>
+    <button class="big-btn" id="btn-start">あそぶ!</button>
+    <div class="hint">🔥で あつく、❄️で つめたく。おみずを さわってみてね</div>
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
