@@ -1,0 +1,11 @@
+{
+  "name": "guruguru-candy-tower",
+  "version": "1.0.0",
+  "description": "ぐるぐるキャンディタワー — お菓子工場の回転塔を巡る14ギミックの3Dからくり。4歳児向け、iPhone/iPad 縦横対応。",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node test/wrap.test.mjs && node test/layout.test.mjs && node test/physics.test.mjs && node test/melody.test.mjs && node test/smoke.mjs"
+  }
+}

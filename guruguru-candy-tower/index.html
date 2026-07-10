@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ぐるぐるキャンディタワー</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#cdeeff">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍭</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden; position: fixed;
+    touch-action: none; overscroll-behavior: none;
+    font-family: "Hiragino Maru Gothic ProN", "BIZ UDPGothic", "Yu Gothic", system-ui, sans-serif;
+    background: #cdeeff;
+    user-select: none; -webkit-user-select: none;
+  }
+  #game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #ui { position: absolute; inset: 0; pointer-events: none; }
+  .hidden { display: none !important; }
+
+  /* ---------- タイトル ---------- */
+  .screen {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 22px;
+    pointer-events: auto; text-align: center;
+    padding: max(20px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+    background: radial-gradient(ellipse at 50% 36%, rgba(255,255,255,0.4), rgba(255,190,220,0.5));
+    transition: opacity .6s ease;
+  }
+  .screen.fade-out { opacity: 0; pointer-events: none; }
+  .game-title {
+    font-size: clamp(28px, 7.5vw, 60px); font-weight: 800; line-height: 1.35; color: #b13d68;
+    text-shadow: 0 3px 0 #fff, 0 10px 24px rgba(200,80,140,.4);
+    animation: bob 2.8s ease-in-out infinite;
+  }
+  .game-sub {
+    font-size: clamp(15px, 4vw, 22px); color: #a05580; text-shadow: 0 2px 0 #fff;
+    line-height: 1.7;
+  }
+  @keyframes bob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-8px) } }
+  .big-btn {
+    pointer-events: auto; border: none; cursor: pointer;
+    font-family: inherit; font-weight: 800;
+    font-size: clamp(22px, 5.5vw, 34px); color: #fff;
+    padding: 18px 52px; border-radius: 999px;
+    background: linear-gradient(180deg, #ff85ad, #f0568b);
+    box-shadow: 0 6px 0 #c23a6d, 0 12px 24px rgba(200,80,140,.4), inset 0 2px 0 rgba(255,255,255,.5);
+    text-shadow: 0 2px 2px rgba(150,40,90,.4);
+  }
+  .big-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #c23a6d, 0 6px 12px rgba(200,80,140,.35); }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    position: absolute; top: max(10px, env(safe-area-inset-top)); left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 0 max(10px, env(safe-area-inset-left)) 0 max(10px, env(safe-area-inset-right));
+    pointer-events: none;
+  }
+  .hud-group { display: flex; gap: 10px; }
+  .hud-btn {
+    pointer-events: auto; border: none; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    min-width: 64px; min-height: 60px; padding: 6px 12px;
+    border-radius: 18px; font-family: inherit;
+    background: linear-gradient(180deg, #fff6fa, #ffdcea);
+    box-shadow: 0 4px 0 #d98cb0, 0 8px 16px rgba(200,100,150,.25), inset 0 1px 0 #fff;
+    color: #b13d68; font-weight: 800; font-size: 12px;
+  }
+  .hud-btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #d98cb0, 0 4px 8px rgba(200,100,150,.2); }
+  .hud-btn .icon { font-size: 24px; line-height: 1.1; }
+  .hud-btn.off { filter: grayscale(.9) brightness(.92); }
+
+  /* ケーキ進捗(中央上) */
+  #cake-progress {
+    position: absolute; left: 50%; top: calc(max(12px, env(safe-area-inset-top)) + 70px);
+    translate: -50% 0; display: flex; gap: 8px;
+    background: rgba(255,255,255,.75); border-radius: 999px; padding: 8px 14px;
+    box-shadow: 0 4px 12px rgba(200,100,150,.25);
+    pointer-events: none;
+  }
+  #cake-progress .slot { font-size: 20px; filter: grayscale(1) opacity(.4); transition: filter .4s, transform .4s; }
+  #cake-progress .slot.done { filter: none; transform: scale(1.15); }
+
+  /* ---------- ふきだし ---------- */
+  #bubble {
+    position: absolute; left: 0; top: 0;
+    margin-left: 14px; margin-top: -54px;
+    background: #fff; color: #7a3053;
+    font-weight: 800; font-size: clamp(15px, 3.6vw, 21px);
+    padding: 10px 16px; border-radius: 18px;
+    border: 3px solid #ff85ad;
+    box-shadow: 0 6px 16px rgba(200,100,150,.3);
+    white-space: nowrap; pointer-events: none;
+    animation: bubblePulse 1.4s ease-in-out infinite;
+  }
+  #bubble::after {
+    content: ''; position: absolute; left: 18px; bottom: -12px;
+    border: 7px solid transparent; border-top-color: #ff85ad;
+  }
+  #bubble.flip { margin-left: -14px; translate: -100% 0; }
+  #bubble.flip::after { left: auto; right: 18px; }
+  @keyframes bubblePulse { 0%,100% { scale: 1 } 50% { scale: 1.05 } }
+
+  /* ---------- やったーバナー ---------- */
+  #banner {
+    position: absolute; left: 50%; top: 30%;
+    translate: -50% -50%;
+    font-size: clamp(38px, 10vw, 84px); font-weight: 800;
+    color: #ff5f96;
+    text-shadow: 0 4px 0 #fff, 0 0 30px rgba(255,190,230,.95), 0 14px 30px rgba(200,60,120,.45);
+    pointer-events: none; white-space: nowrap;
+  }
+  #banner.pop { animation: bannerPop 1s cubic-bezier(.2,2.2,.4,1) both, bannerWiggle 1.6s ease-in-out .9s infinite; }
+  @keyframes bannerPop { from { scale: 0; rotate: -12deg } to { scale: 1; rotate: 0deg } }
+  @keyframes bannerWiggle { 0%,100% { rotate: -2deg } 50% { rotate: 2deg } }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="ui">
+  <div id="hud" class="hidden">
+    <div class="hud-group">
+      <button id="btn-guide" class="hud-btn" type="button">
+        <span class="icon">👉</span><span class="label">ガイド ON</span>
+      </button>
+    </div>
+    <div id="cake-progress">
+      <span class="slot">🍓</span><span class="slot">🍫</span><span class="slot">🕯️</span>
+    </div>
+    <div class="hud-group">
+      <button id="btn-mute" class="hud-btn" type="button">
+        <span class="icon">🔊</span><span class="label">おと</span>
+      </button>
+      <button id="btn-reset" class="hud-btn" type="button">
+        <span class="icon">🔁</span><span class="label">たまを もどす</span>
+      </button>
+    </div>
+  </div>
+  <div id="bubble" class="hidden">ここを タップ!</div>
+  <div id="banner" class="hidden">🎉 やったー! 🎉</div>
+  <div id="title-screen" class="screen">
+    <div class="game-title">🍭 ぐるぐる<br>キャンディタワー</div>
+    <div class="game-sub">タップと ながおしと ぐるぐるで<br>キャンディを ケーキの てっぺんへ!</div>
+    <button id="btn-start" class="big-btn" type="button">はじめる</button>
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
