@@ -1,0 +1,11 @@
+{
+  "name": "mizu-no-fushigi-kitchen",
+  "version": "1.0.0",
+  "description": "みずのふしぎキッチン — States of Matter (Tinybop) 風、水の状態変化で遊ぶ 3D サンドボックス (iPhone/iPad 向け)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node test/thermo-test.mjs && node test/smoke.mjs"
+  }
+}
