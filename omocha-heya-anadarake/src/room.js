@@ -201,6 +201,27 @@ export class Room {
       g.add(side);
     }
 
+    // 4th wall (front): single-sided facing inward, so it vanishes whenever
+    // the camera is on the default side and becomes the backdrop when the
+    // player orbits around — free dollhouse cutaway.
+    const front = new THREE.Mesh(
+      new THREE.PlaneGeometry(ROOM_W + 0.4, WALL_H),
+      new THREE.MeshLambertMaterial({ map: wallTexture(pal, { stars: pal.name === 'yozora' }) })
+    );
+    front.position.set(0, WALL_H / 2, ROOM_D / 2 + 0.05);
+    front.rotation.y = Math.PI;
+    front.receiveShadow = true;
+    g.add(front);
+    // a picture on the front wall so the far side isn't bare when orbited to
+    const frontArt = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.3, 1.3),
+      new THREE.MeshBasicMaterial({ map: artTexture(pal.name === 'yozora' ? '🌟' : '🧸', pal.accents[3]) })
+    );
+    frontArt.position.set(-2.5, 3.0, ROOM_D / 2 + 0.03);
+    frontArt.rotation.y = Math.PI;
+    frontArt.rotation.z = 0.03;
+    g.add(frontArt);
+
     // window on the back wall
     const win = new THREE.Mesh(
       new THREE.PlaneGeometry(3.0, 3.4),

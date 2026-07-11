@@ -62,6 +62,9 @@ export class Effects {
     this._dummy = new THREE.Object3D();
 
     // --- impact rings
+    // where particles come to rest (lowered during the bottom-world finale)
+    this.floorY = 0;
+
     this.rings = [];
     for (let i = 0; i < 5; i++) {
       const m = new THREE.Mesh(
@@ -145,14 +148,14 @@ export class Effects {
     }
   }
 
-  confettiBurst(x, z, count = 60) {
+  confettiBurst(x, z, count = 60, baseY = 5) {
     let placed = 0;
     for (const c of this.conf) {
       if (placed >= count) break;
       if (c.life > 0) continue;
       placed++;
       c.x = x + (Math.random() - 0.5) * 3;
-      c.y = 5 + Math.random() * 3.5;
+      c.y = baseY + Math.random() * 3.5;
       c.z = z + (Math.random() - 0.5) * 3;
       c.vx = (Math.random() - 0.5) * 2;
       c.vy = -(0.4 + Math.random() * 0.8);
@@ -171,7 +174,8 @@ export class Effects {
       p.life -= dt;
       p.vy -= 9.8 * p.grav * dt;
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-      if (p.y < 0.02 && p.vy < 0) { p.vy *= -0.3; p.y = 0.02; p.vx *= 0.7; p.vz *= 0.7; }
+      const fy = this.floorY + 0.02;
+      if (p.y < fy && p.vy < 0) { p.vy *= -0.3; p.y = fy; p.vx *= 0.7; p.vz *= 0.7; }
       this.pPos[i * 3] = p.x; this.pPos[i * 3 + 1] = p.y; this.pPos[i * 3 + 2] = p.z;
     }
     this.pGeo.attributes.position.needsUpdate = true;
@@ -195,7 +199,8 @@ export class Effects {
       c.vx *= 0.98; c.vz *= 0.98;
       c.vy = Math.max(c.vy - 1.4 * dt, -1.4);
       c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt;
-      if (c.y < 0.03) { c.y = 0.03; c.vy = 0; c.vx *= 0.9; c.vz *= 0.9; }
+      const cfy = this.floorY + 0.03;
+      if (c.y < cfy) { c.y = cfy; c.vy = 0; c.vx *= 0.9; c.vz *= 0.9; }
       c.rot.x += c.rv.x * dt; c.rot.y += c.rv.y * dt; c.rot.z += c.rv.z * dt;
       this._dummy.position.set(c.x, c.y, c.z);
       this._dummy.rotation.copy(c.rot);
