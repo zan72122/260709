@@ -358,23 +358,28 @@ export class HoleEngine {
       if (upper && upper.supportId === p.id && upper.state === S.REST) {
         upper.supportId = null;
         upper.state = S.TOSSED; upper.t = 0; upper.bounces = 0;
+        // flung along the plank axis: local +X → world (c, −s)
         const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
         upper.vx = c * dev.launchDir * 3.2 + (this.rand() - 0.5);
-        upper.vz = s * dev.launchDir * 3.2 + (this.rand() - 0.5);
+        upper.vz = -s * dev.launchDir * 3.2 + (this.rand() - 0.5);
         upper.vy = 10.5 + this.rand() * 1.5;
         upper.spin = 6 + this.rand() * 4; upper.spinAxis = this._randAxis();
         this.emit('catapult', upper);
       }
+      // anything else perched on the plank (a smug cat…) is thrown too
+      this._detachDependents(p, 0.8);
     }
 
     for (const p of this.props) this._updateProp(p, dt);
     this._separateResting(dt);
   }
 
-  // world-space top of a slide's platform / a device anchor point
+  // world-space top of a slide's platform / a device anchor point.
+  // NOTE: must match THREE's rotation.y convention exactly, or physics and
+  // visuals mirror each other: local(lx,lz) → world(c·lx + s·lz, −s·lx + c·lz)
   _deviceWorld(p, lx, lz) {
     const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
-    return { x: p.x + c * lx - s * lz, z: p.z + s * lx + c * lz };
+    return { x: p.x + c * lx + s * lz, z: p.z - s * lx + c * lz };
   }
 
   _updateProp(p, dt) {
@@ -431,13 +436,14 @@ export class HoleEngine {
         p.x = a.x; p.z = a.z;
         p.y = dev.topH + (dev.exitH - dev.topH) * k;
         p.yaw = sl.yaw;
+        // lean nose-down along the downhill direction (c, −s)·dir
         p.tiltX = Math.sin(sl.yaw) * -dev.lean;
-        p.tiltZ = Math.cos(sl.yaw) * dev.lean;
+        p.tiltZ = Math.cos(sl.yaw) * -dev.lean;
         if (k >= 1) {
           p.state = S.TOSSED; p.t = 0; p.bounces = 0;
           const c = Math.cos(sl.yaw), s = Math.sin(sl.yaw);
           const dir = Math.sign(dev.exitX - dev.topX);
-          p.vx = c * dir * 3.4; p.vz = s * dir * 3.4;
+          p.vx = c * dir * 3.4; p.vz = -s * dir * 3.4;
           p.vy = 1.6;
           p.tiltX = 0; p.tiltZ = 0;
           p.spin = 3 + this.rand() * 3; p.spinAxis = this._randAxis();
@@ -556,6 +562,19 @@ export class HoleEngine {
       }
 
       case S.STUCK: {
+        // if the hole hurries away, the wedged toy is left behind on the rim
+        // (it does NOT get carried around in the hole's mouth)
+        if (Math.hypot(h.vx, h.vz) > 2.8) {
+          this.hole.pluggedBy = 0;
+          p.state = S.TOSSED; p.t = 0; p.bounces = 0;
+          p.sink = 0;
+          p.vx = (this.rand() - 0.5) * 1.2;
+          p.vz = (this.rand() - 0.5) * 1.2;
+          p.vy = 3.2;
+          p.spin = 3 + this.rand() * 3; p.spinAxis = this._randAxis();
+          this.emit('popOut', p);
+          return;
+        }
         const tight = p.slimR / Math.max(0.05, h.r);
         const targetSink = Math.min(p.desc.sy * 0.55, h.r * 0.8) * Math.min(1, 2.2 - tight);
         p.sink += (targetSink - p.sink) * Math.min(1, 6 * dt);
@@ -605,8 +624,8 @@ export class HoleEngine {
           return;
         }
         const dip = Math.min(0.4, w.r * 0.9 + h.r * 0.12);
-        const lx = Math.cos(p.yaw) * w.x - Math.sin(p.yaw) * w.z;
-        const lz = Math.sin(p.yaw) * w.x + Math.cos(p.yaw) * w.z;
+        const lx = Math.cos(p.yaw) * w.x + Math.sin(p.yaw) * w.z;
+        const lz = -Math.sin(p.yaw) * w.x + Math.cos(p.yaw) * w.z;
         const len = Math.hypot(lx, lz) || 1e-4;
         const ang = Math.atan2(dip, Math.max(0.2, len * 2));
         p.tiltX += ((lz / len) * ang - p.tiltX) * 6 * dt;
@@ -706,7 +725,7 @@ export class HoleEngine {
               return;
             }
           }
-          if (this._deviceIntercept(p)) { this.projectile = null; return; }
+          if (this._deviceIntercept(p, dt)) { this.projectile = null; return; }
         }
         if (p.vy < 0 && p.y <= 0) {
           p.y = 0;
@@ -727,7 +746,7 @@ export class HoleEngine {
         const mw = this.roomW / 2 - 0.4, md = this.roomD / 2 - 0.4;
         if (p.x < -mw || p.x > mw) { p.vx *= -0.5; p.x = Math.max(-mw, Math.min(mw, p.x)); }
         if (p.z < -md || p.z > md) { p.vz *= -0.5; p.z = Math.max(-md, Math.min(md, p.z)); }
-        if (p.vy < 0 && this._deviceIntercept(p)) return;
+        if (p.vy < 0 && this._deviceIntercept(p, dt)) return;
         // if it comes down over the hole, it just falls in — gravity!
         if (p.y <= 0.1 && p.vy < 0) {
           const d = Math.hypot(p.x - h.x, p.z - h.z);
@@ -759,14 +778,16 @@ export class HoleEngine {
     }
   }
 
-  // trampoline bounce & slide-platform catch for anything coming down
-  _deviceIntercept(p) {
+  // trampoline bounce & slide-platform catch for anything coming down.
+  // the catch window sweeps with fall speed so fast toys can't tunnel through
+  _deviceIntercept(p, dt = 1 / 60) {
     for (const q of this.props) {
       const dev = q.desc.device;
       if (!dev || p === q) continue;
       if (dev.type === 'tramp') {
         const d = Math.hypot(p.x - q.x, p.z - q.z);
-        if (d < q.desc.topR && p.y <= dev.topY + 0.1 && p.y > dev.topY - 0.4) {
+        const sweep = Math.max(0.4, -p.vy * dt * 1.6);
+        if (d < q.desc.topR && p.y <= dev.topY + 0.1 && p.y > dev.topY - sweep) {
           p.y = dev.topY;
           p.vy = Math.max(-p.vy * 0.9, 6.4);
           p.vx = p.vx * 0.9 + (this.rand() - 0.5) * 0.7;
@@ -853,13 +874,14 @@ export class HoleEngine {
       if (dev && dev.type === 'cupboard' && !dev.open) {
         dev.open = true;
         this.emit('cupboardOpen', p);
+        // treasure flies out of the DOOR side: local +Z → world (s, c)
         const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
         let i = 0;
         for (const q of this.props) {
           if (q.supportId !== p.id || q.state !== S.REST) continue;
           q.supportId = null;
           q.state = S.TOSSED; q.t = -(i * 0.09); q.bounces = 0;
-          q.vx = -s * dev.face * (2.0 + this.rand()) + (this.rand() - 0.5) * 1.4;
+          q.vx = s * dev.face * (2.0 + this.rand()) + (this.rand() - 0.5) * 1.4;
           q.vz = c * dev.face * (2.0 + this.rand()) + (this.rand() - 0.5) * 1.4;
           q.vy = 2.6 + this.rand() * 2;
           q.spin = 4 + this.rand() * 5; q.spinAxis = this._randAxis();
@@ -974,7 +996,12 @@ export class HoleEngine {
           const ta = Math.atan2(lz - p.z, lx - p.x);
           p.heading += this._angleTo(p.heading, ta) * Math.min(1, 6 * dt);
           speed = dd > 1.4 ? p.walkSpeed * 1.6 : dd > 0.3 ? p.walkSpeed : 0;
-        } else { speed = 0; }
+        } else {
+          // parent is gone: an orphaned chick strikes out on its own
+          p.followId = null;
+          p.peckT = 0;
+          speed = 0;
+        }
       } else if (w.kind === 'dog') {
         // puppies live to poke balls around the room
         p._nudgeCd = (p._nudgeCd || 0) - dt;
@@ -1054,8 +1081,9 @@ export class HoleEngine {
   }
 
   _wheelWorld(p, w) {
+    // THREE rotation.y convention (see _deviceWorld)
     const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
-    return { x: p.x + c * w.x - s * w.z, z: p.z + s * w.x + c * w.z, r: w.r };
+    return { x: p.x + c * w.x + s * w.z, z: p.z - s * w.x + c * w.z, r: w.r };
   }
 
   _fitsCompact(p) { return p.slimR <= this.hole.r * 0.98; }
@@ -1073,10 +1101,11 @@ export class HoleEngine {
   }
 
   _endpoints(p) {
+    // THREE rotation.y convention: local +X → (c, −s), local +Z → (s, c)
     const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
     const along = p.desc.sx >= p.desc.sz;   // builders lay length on local x
     const hl = p.desc.halfLen * 0.8;
-    const ax = along ? c : -s, az = along ? s : c;
+    const ax = along ? c : s, az = along ? -s : c;
     return [
       { x: p.x + ax * hl, z: p.z + az * hl },
       { x: p.x - ax * hl, z: p.z - az * hl },
