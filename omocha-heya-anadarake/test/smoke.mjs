@@ -38,10 +38,11 @@ for (const m of ['../src/hole.js', '../src/room.js', '../src/effects.js']) {
 
 // --- bot player, v2 rules
 function endpointOf(p) {
+  // THREE rotation.y convention, matching physics._endpoints
   const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
   const along = p.desc.sx >= p.desc.sz;
   const hl = p.desc.halfLen * 0.8;
-  const ax = along ? c : -s, az = along ? s : c;
+  const ax = along ? c : s, az = along ? -s : c;
   return { x: p.x + ax * hl, z: p.z + az * hl };
 }
 

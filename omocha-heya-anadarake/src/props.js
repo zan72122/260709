@@ -651,7 +651,8 @@ export function buildSeesaw(color, accent) {
   return {
     group: g,
     desc: makeDesc('seesaw', 2.6, 1.1, 0.55, {
-      topR: 0.45, topY: 1.15, name: 'seesaw',
+      // plank end height: pivot 0.42 + 1.3·sin(0.3) ≈ 0.80
+      topR: 0.45, topY: 0.82, name: 'seesaw',
       device: { type: 'seesaw', lowerId: 0, upperId: 0, launchDir: 1, flipped: false },
     }),
   };
@@ -981,10 +982,10 @@ function layoutPlayRoom(scene, engine, paletteIndex, rand) {
     const sp = put(sl, -6.8, -2.8, { yaw: 0.5 });
     const riders = [buildBall(A[0], 0.22), buildDice(), buildBlock(A[4], 'S', 0.3)];
     riders.forEach((r, i) => {
-      // queue them across the platform (local -x end)
+      // queue them across the platform (local -x end), THREE yaw convention
       const lx = -0.95 - i * 0.02, lz = (i - 1) * 0.24;
       const c = Math.cos(sp.yaw), s = Math.sin(sp.yaw);
-      const p = put(r, sp.x + c * lx - s * lz, sp.z + s * lx + c * lz, { y: 1.99, supportId: sp.id });
+      const p = put(r, sp.x + c * lx + s * lz, sp.z - s * lx + c * lz, { y: 1.99, supportId: sp.id });
       p._slideQueue = i;
     });
   }
@@ -993,10 +994,11 @@ function layoutPlayRoom(scene, engine, paletteIndex, rand) {
   {
     const ss = buildSeesaw(A[1], A[3]);
     const sp = put(ss, 4.8, 4.0, { yaw: -0.5 });
+    // plank ends in THREE yaw convention: local ±X → (±c, ∓s)
     const c = Math.cos(sp.yaw), s = Math.sin(sp.yaw);
     // low end (local -x) rests on the floor with a drum on it
-    const low = put(buildDrum(A[3], A[0]), sp.x - c * 1.1, sp.z - s * 1.1);
-    const high = put(buildBall(A[5], 0.26), sp.x + c * 1.1, sp.z + s * 1.1, { y: 1.15, supportId: sp.id });
+    const low = put(buildDrum(A[3], A[0]), sp.x - c * 1.1, sp.z + s * 1.1);
+    const high = put(buildBall(A[5], 0.26), sp.x + c * 1.1, sp.z - s * 1.1, { y: 0.82, supportId: sp.id });
     sp.desc.device.lowerId = low.id;
     sp.desc.device.upperId = high.id;
     sp.desc.device.launchDir = 1;

@@ -394,5 +394,150 @@ const has = (evs, type, pred = () => true) => evs.some((e) => e.type === type &&
   check(has(evs, 'burp'), 'burp: the hole burps after a big meal');
 }
 
+// ================================================================ v4.1
+// 物理とTHREE描画の回転規約一致 — ここが鏡像だと「見た目と違う場所」で
+// 物理が起きる(とだなが背面から吐く・車輪判定が逆側に出る等)
+
+// THREE's rotation.y: local(lx,lz) → world(c·lx + s·lz, −s·lx + c·lz)
+const threeYaw = (yaw, lx, lz) => {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  return { x: c * lx + s * lz, z: -s * lx + c * lz };
+};
+
+{
+  const eng = makeEngine(0.4, 8, 8);
+  const trike = eng.addProp(makeDesc('tricycle', 1.3, 0.95, 0.68, {
+    wheels: [{ x: 0.45, z: 0, r: 0.3 }],
+  }), 2, 3, { yaw: 1.1 });
+  const crayon = eng.addProp(makeDesc('crayon', 0.9, 0.18, 0.18), -2, -3, { yaw: -2.3 });
+  for (const yaw of [0.5, -1.2, Math.PI / 2, 2.8]) {
+    trike.yaw = yaw;
+    const w = eng._wheelWorld(trike, trike.desc.wheels[0]);
+    const t = threeYaw(yaw, 0.45, 0);
+    check(Math.abs(w.x - trike.x - t.x) < 1e-9 && Math.abs(w.z - trike.z - t.z) < 1e-9,
+      `rotation: wheel position matches THREE at yaw=${yaw.toFixed(2)}`);
+    const d = eng._deviceWorld(trike, -0.95, 0.3);
+    const t2 = threeYaw(yaw, -0.95, 0.3);
+    check(Math.abs(d.x - trike.x - t2.x) < 1e-9 && Math.abs(d.z - trike.z - t2.z) < 1e-9,
+      `rotation: device anchor matches THREE at yaw=${yaw.toFixed(2)}`);
+    crayon.yaw = yaw;
+    const [e1] = eng._endpoints(crayon);
+    const t3 = threeYaw(yaw, crayon.desc.halfLen * 0.8, 0);
+    check(Math.abs(e1.x - crayon.x - t3.x) < 1e-9 && Math.abs(e1.z - crayon.z - t3.z) < 1e-9,
+      `rotation: endpoint matches THREE at yaw=${yaw.toFixed(2)}`);
+  }
+}
+
+// ---------------------------------------------------------------- とだな(向き)
+{
+  const eng = makeEngine(0.5, 6, 0);
+  const cb = eng.addProp(makeDesc('cupboard', 1.7, 1.9, 0.75, {
+    fixture: true, topR: 0, topY: 1.9,
+    device: { type: 'cupboard', open: false, face: 1 },
+  }), 0, 0, { yaw: -Math.PI / 2 });   // doors visually face world −x
+  const t1 = eng.addProp(makeDesc('ball', 0.36, 0.36, 0.36, { round: true }), 0, 0.2, { y: 0.28, supportId: cb.id });
+  eng.setHoleTarget(0, 0);
+  const dt = 1 / 60;
+  let vx = null;
+  for (let i = 0; i < 240 && vx === null; i++) {
+    eng.update(dt);
+    for (const e of eng.events) if (e.type === 'cupboardOpen') vx = t1.vx;
+    eng.events.length = 0;
+  }
+  check(vx !== null && vx < -0.4, `cupboard-dir: toys fly out of the DOOR side (vx=${vx && vx.toFixed(2)})`);
+}
+
+// ---------------------------------------------------------------- 車輪(yaw付き)
+{
+  const eng = makeEngine(0.4, 8, 8);
+  // single front wheel so the mirrored spot is genuinely empty
+  const mkTrike = () => makeDesc('tricycle', 1.3, 0.95, 0.68, {
+    wheels: [{ x: 0.45, z: 0, r: 0.3 }],
+  });
+  // yaw=π/2 → front wheel is visually at (x, z−0.45)
+  const trike = eng.addProp(mkTrike(), 0, 0, { yaw: Math.PI / 2 });
+  eng.hole.x = 0; eng.hole.z = -0.45; eng.setHoleTarget(0, -0.45);
+  let evs = run(eng, 1.5);
+  check(has(evs, 'wheelCatch'), 'yawed-wheel: catches at the VISUAL wheel position');
+  // and the old mirrored position must NOT catch
+  const eng2 = makeEngine(0.4, 8, 8);
+  const trike2 = eng2.addProp(mkTrike(), 0, 0, { yaw: Math.PI / 2 });
+  eng2.hole.x = 0; eng2.hole.z = 0.45; eng2.setHoleTarget(0, 0.45);
+  evs = run(eng2, 1.5);
+  check(!has(evs, 'wheelCatch'), 'yawed-wheel: silent at the old mirrored (empty) spot');
+}
+
+// ---------------------------------------------------------------- するっ(yaw付き)
+{
+  const eng = makeEngine(0.3, 8, 8);
+  // yaw=π/2 → the crayon lies along world z; its +end is at z−0.36
+  const crayon = eng.addProp(makeDesc('crayon', 0.9, 0.18, 0.18), 0, 0, { yaw: Math.PI / 2 });
+  eng.hole.x = 0; eng.hole.z = -0.4; eng.setHoleTarget(0, -0.4);
+  const evs = run(eng, 3);
+  check(has(evs, 'tipStart'), 'yawed-endtip: hole under the VISUAL end swallows the crayon');
+  check(crayon.state === S.GONE, 'yawed-endtip: crayon gone');
+}
+
+// ---------------------------------------------------------------- シーソー(yaw付き射出方向)
+{
+  const eng = makeEngine(0.5, 8, 8);
+  const ss = eng.addProp(makeDesc('seesaw', 2.6, 1.1, 0.55, {
+    topR: 0.45, topY: 0.82,
+    device: { type: 'seesaw', lowerId: 0, upperId: 0, launchDir: 1, flipped: false },
+  }), 0, 0, { yaw: Math.PI / 2 });   // plank runs along world z; +X end → z−1.1
+  const low = eng.addProp(makeDesc('drum', 0.64, 0.42, 0.64, { round: true }), 0, 1.1);
+  const high = eng.addProp(makeDesc('ball', 0.5, 0.5, 0.5, { round: true }), 0, -1.1,
+    { y: 0.82, supportId: ss.id });
+  ss.desc.device.lowerId = low.id;
+  ss.desc.device.upperId = high.id;
+  const z0 = high.z;
+  const evs = chase(eng, low, 3);
+  check(has(evs, 'catapult'), 'yawed-seesaw: catapult fires');
+  check(high.z < z0 - 0.5, `yawed-seesaw: ball flies along the plank axis (dz=${(high.z - z0).toFixed(2)})`);
+}
+
+// ---------------------------------------------------------------- 挟まり置き去り
+{
+  const eng = makeEngine(0.34);
+  const ball = eng.addProp(makeDesc('ball', 0.68, 0.68, 0.68, { round: true }), 0.03, 0);
+  run(eng, 0.4);                       // let it wedge
+  check(ball.state === S.STUCK, 'stuck-release: ball is wedged');
+  eng.setHoleTarget(8, 0);             // the hole hurries away
+  const evs = run(eng, 3);
+  check(has(evs, 'popOut'), 'stuck-release: toy is left behind, not carried');
+  check(ball.state !== S.GONE && Math.abs(ball.x) < 2.5,
+    `stuck-release: toy stays near where it was wedged (x=${ball.x.toFixed(2)})`);
+}
+
+// ---------------------------------------------------------------- ヒナのひとり立ち
+{
+  const eng = makeEngine(0.5, 8, 8);
+  const hen = eng.addProp(
+    makeDesc('hen', 0.5, 0.7, 0.5, { round: true, walker: { speed: 0.85, flee: 2.3 } }), -3, 0);
+  const chick = eng.addProp(
+    makeDesc('chick', 0.24, 0.35, 0.24, { round: true, walker: { speed: 1.1, flee: 2.0 } }),
+    -2.5, 0, { followId: hen.id });
+  chase(eng, hen, 8);
+  check(hen.state === S.GONE, 'orphan: hen caught');
+  eng.setHoleTarget(8, 8);
+  const cx = chick.x, cz = chick.z;
+  run(eng, 10);
+  check(chick.state === S.WANDER && Math.hypot(chick.x - cx, chick.z - cz) > 0.5,
+    'orphan: chick wanders on alone instead of freezing');
+}
+
+// ---------------------------------------------------------------- トランポリン貫通なし
+{
+  const eng = makeEngine(0.5, 6, 6);
+  eng.addProp(makeDesc('trampoline', 1.74, 0.42, 1.74, {
+    round: true, fixture: true, topR: 0.75, topY: 0.38,
+    device: { type: 'tramp', topY: 0.38 },
+  }), 0, 0);
+  const ball = eng.addProp(makeDesc('ball', 0.3, 0.3, 0.3, { round: true }), 0.05, 0, { state: 'tossed' });
+  ball.y = 3; ball.vy = -20; ball.bounces = 0;   // rocket-speed drop
+  const evs = run(eng, 1);
+  check(has(evs, 'tramp'), 'tramp-sweep: even a rocket-speed drop bounces, no tunnelling');
+}
+
 console.log(ok ? 'PHYSICS PASS' : 'PHYSICS FAIL');
 process.exit(ok ? 0 : 1);
