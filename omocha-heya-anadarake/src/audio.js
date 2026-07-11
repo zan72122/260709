@@ -186,6 +186,97 @@ export class AudioEngine {
     this._tone(1900, t, 0.03, 'square', 0.025, 1400);
   }
 
+  pant() {
+    if (!this._ok('pant', 0.4)) return;
+    const t = this._now();
+    for (let i = 0; i < 3; i++) {
+      this._noise(t + i * 0.16, 0.08, { freq: 1200, q: 0.8, vol: 0.05 });
+    }
+  }
+
+  bark() {
+    if (!this._ok('bark', 0.25)) return;
+    const t = this._now();
+    for (let i = 0; i < 2; i++) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(340, t + i * 0.14);
+      o.frequency.exponentialRampToValueAtTime(190, t + i * 0.14 + 0.09);
+      const f = this.ctx.createBiquadFilter();
+      f.type = 'bandpass'; f.frequency.value = 700; f.Q.value = 1.6;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.2, t + i * 0.14);
+      g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.14 + 0.1);
+      o.connect(f).connect(g).connect(this.master);
+      o.start(t + i * 0.14); o.stop(t + i * 0.14 + 0.12);
+    }
+  }
+
+  meow(annoyed = false) {
+    if (!this._ok('meow', 0.3)) return;
+    const t = this._now();
+    const o = this.ctx.createOscillator();
+    o.type = 'sawtooth';
+    const f0 = annoyed ? 520 : 420;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f0 * 1.7, t + 0.12);
+    o.frequency.exponentialRampToValueAtTime(f0 * 0.75, t + 0.34);
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'bandpass'; f.frequency.value = 1100; f.Q.value = 2;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+    o.connect(f).connect(g).connect(this.master);
+    o.start(t); o.stop(t + 0.4);
+  }
+
+  burp() {
+    if (!this._ok()) return;
+    const t = this._now();
+    const o = this.ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(120, t);
+    o.frequency.exponentialRampToValueAtTime(55, t + 0.35);
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 500;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.28, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    o.connect(f).connect(g).connect(this.master);
+    o.start(t); o.stop(t + 0.45);
+    this._noise(t, 0.3, { freq: 300, bendTo: 120, vol: 0.1 });
+  }
+
+  whee() {
+    if (!this._ok('whee', 0.2)) return;
+    const t = this._now();
+    this._tone(500, t, 0.5, 'sine', 0.13, 1250);
+    this._tone(750, t + 0.05, 0.4, 'sine', 0.05, 1700);
+  }
+
+  doorBang() {
+    if (!this._ok()) return;
+    const t = this._now();
+    this._noise(t, 0.12, { freq: 600, q: 0.7, vol: 0.24 });
+    this._tone(140, t, 0.25, 'square', 0.12, 70);
+    this._tone(90, t + 0.05, 0.3, 'sine', 0.18, 45);
+  }
+
+  tick() {
+    if (!this._ok('tick', 0.12)) return;
+    const t = this._now();
+    this._tone(1500 + Math.random() * 300, t, 0.04, 'sine', 0.06, 1100);
+  }
+
+  seesaw() {
+    if (!this._ok()) return;
+    const t = this._now();
+    this._tone(180, t, 0.12, 'triangle', 0.16, 420);   // creak-up
+    this._noise(t + 0.1, 0.08, { freq: 900, q: 2, vol: 0.1 });
+    this._tone(520, t + 0.12, 0.2, 'sine', 0.12, 880); // spring fling
+  }
+
   boing(size = 0.3) {
     if (!this._ok('boing', 0.1)) return;
     const t = this._now();

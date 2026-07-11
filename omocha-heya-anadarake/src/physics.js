@@ -35,7 +35,9 @@ export const S = {
   LAUNCHED: 'launched',    // fired up out of the hole
   TOSSED: 'tossed',        // ballistic above ground
   BALLOON: 'balloon',      // hovering on a balloon
-  WANDER: 'wander',        // walking toy (chick family)
+  WANDER: 'wander',        // walking toy (chick family, dog, cat)
+  SLIDING: 'sliding',      // whooshing down the slide chute
+  RAILING: 'railing',      // rolling along the marble rail
   GONE: 'gone',
 };
 
@@ -132,6 +134,7 @@ export function makeDesc(kind, sx, sy, sz, opt = {}) {
     topY: opt.topY || sy,
     walker: opt.walker || null,
     pinata: !!opt.pinata,
+    device: opt.device || null,   // slide / seesaw / cupboard / tramp / rail
     yaw: opt.yaw || 0,
     name: opt.name || kind,
   };
@@ -163,6 +166,7 @@ export class HoleEngine {
     this.maxHoleR = opt.maxHoleR || 4.6;
     this.waterTimer = 0;
     this.floatQueue = 0;
+    this.burps = [];               // pending burps after big meals
   }
 
   addProp(desc, x, z, opt = {}) {
@@ -245,6 +249,7 @@ export class HoleEngine {
     }
     if (p.desc.pinata) this.emit('pinata', p, { x: this.hole.x, z: this.hole.z });
     if (!p.desc.waterSource && !p.desc.walker && this.belly.length < 3) this.belly.push(p);
+    if (p.footR > 0.55) this.burps.push({ t: 1.1 + this.rand() * 0.5 });
   }
 
   // spawn a burst of mini props (piñata contents). descs: [{desc, ...}]
@@ -322,8 +327,54 @@ export class HoleEngine {
       }
     }
 
+    // げっぷ: a beat after a big meal, sometimes spitting a small toy back
+    for (let i = this.burps.length - 1; i >= 0; i--) {
+      this.burps[i].t -= dt;
+      if (this.burps[i].t > 0) continue;
+      this.burps.splice(i, 1);
+      this.emit('burp');
+      if (this.rand() < 0.3 && this.belly.length) {
+        const p = this.belly.pop();
+        p.state = S.TOSSED; p.t = 0; p.bounces = 0;
+        const a = this.rand() * Math.PI * 2;
+        p.x = h.x; p.z = h.z; p.y = 0.2;
+        p.vx = Math.cos(a) * 2; p.vz = Math.sin(a) * 2;
+        p.vy = 7 + this.rand() * 2;
+        p.spin = 5 + this.rand() * 4; p.spinAxis = this._randAxis();
+        this.emit('burpSpit', p);
+      }
+    }
+
+    // seesaws watch their loaded pan
+    for (const p of this.props) {
+      const dev = p.desc.device;
+      if (!dev || dev.type !== 'seesaw' || dev.flipped || !dev.lowerId) continue;
+      const lower = this.byId.get(dev.lowerId);
+      const gone = !lower || (lower.state !== S.REST && lower.state !== S.TEETER);
+      if (!gone) continue;
+      dev.flipped = true;
+      this.emit('seesawFlip', p);
+      const upper = this.byId.get(dev.upperId);
+      if (upper && upper.supportId === p.id && upper.state === S.REST) {
+        upper.supportId = null;
+        upper.state = S.TOSSED; upper.t = 0; upper.bounces = 0;
+        const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+        upper.vx = c * dev.launchDir * 3.2 + (this.rand() - 0.5);
+        upper.vz = s * dev.launchDir * 3.2 + (this.rand() - 0.5);
+        upper.vy = 10.5 + this.rand() * 1.5;
+        upper.spin = 6 + this.rand() * 4; upper.spinAxis = this._randAxis();
+        this.emit('catapult', upper);
+      }
+    }
+
     for (const p of this.props) this._updateProp(p, dt);
     this._separateResting(dt);
+  }
+
+  // world-space top of a slide's platform / a device anchor point
+  _deviceWorld(p, lx, lz) {
+    const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+    return { x: p.x + c * lx - s * lz, z: p.z + s * lx + c * lz };
   }
 
   _updateProp(p, dt) {
@@ -366,6 +417,54 @@ export class HoleEngine {
 
       case S.WANDER: {
         this._updateWalker(p, dt);
+        return;
+      }
+
+      case S.SLIDING: {
+        // whee! accelerate down the chute, then fly off the end
+        const sl = this.byId.get(p._deviceId);
+        if (!sl) { p.state = S.TOSSED; p.t = 0; return; }
+        const dev = sl.desc.device;
+        p._slideT = Math.min(1, (p._slideT || 0) + dt * (1.1 + p._slideT * 2.2));
+        const k = p._slideT;
+        const a = this._deviceWorld(sl, dev.topX + (dev.exitX - dev.topX) * k, 0);
+        p.x = a.x; p.z = a.z;
+        p.y = dev.topH + (dev.exitH - dev.topH) * k;
+        p.yaw = sl.yaw;
+        p.tiltX = Math.sin(sl.yaw) * -dev.lean;
+        p.tiltZ = Math.cos(sl.yaw) * dev.lean;
+        if (k >= 1) {
+          p.state = S.TOSSED; p.t = 0; p.bounces = 0;
+          const c = Math.cos(sl.yaw), s = Math.sin(sl.yaw);
+          const dir = Math.sign(dev.exitX - dev.topX);
+          p.vx = c * dir * 3.4; p.vz = s * dir * 3.4;
+          p.vy = 1.6;
+          p.tiltX = 0; p.tiltZ = 0;
+          p.spin = 3 + this.rand() * 3; p.spinAxis = this._randAxis();
+          this.emit('slideExit', p);
+        }
+        return;
+      }
+
+      case S.RAILING: {
+        const rl = this.byId.get(p._deviceId);
+        if (!rl) { p.state = S.TOSSED; p.t = 0; return; }
+        const dev = rl.desc.device;
+        p._railT = Math.min(1, (p._railT || 0) + dt * 0.55);
+        const k = p._railT;
+        p.x = dev.fromX + (dev.toX - dev.fromX) * k;
+        p.z = dev.fromZ + (dev.toZ - dev.fromZ) * k;
+        p.y = dev.h;
+        p.spinAngle += dt * 9;
+        p.spinAxis = [dev.toZ - dev.fromZ, 0, -(dev.toX - dev.fromX)];
+        p._rattleT -= dt;
+        if (p._rattleT <= 0) { p._rattleT = 0.22; this.emit('railTick', p); }
+        if (k >= 1) {
+          p.state = S.TOSSED; p.t = 0; p.bounces = 0;
+          p.vx = (dev.toX - dev.fromX) * 0.12; p.vz = (dev.toZ - dev.fromZ) * 0.12;
+          p.vy = 0;
+          this.emit('railDrop', p);
+        }
         return;
       }
 
@@ -594,6 +693,21 @@ export class HoleEngine {
             this.emit('balloonPop', q);
           }
         }
+        // a lobbed toy can drop into the rail hopper or onto devices
+        if (p.vy < 0) {
+          for (const q of this.props) {
+            const dev = q.desc.device;
+            if (!dev || dev.type !== 'rail') continue;
+            const d3 = Math.hypot(p.x - dev.fromX, p.y - dev.h, p.z - dev.fromZ);
+            if (d3 < 0.9) {
+              this.projectile = null;
+              p.state = S.RAILING; p.t = 0; p._railT = 0; p._deviceId = q.id;
+              this.emit('railCatch', p);
+              return;
+            }
+          }
+          if (this._deviceIntercept(p)) { this.projectile = null; return; }
+        }
         if (p.vy < 0 && p.y <= 0) {
           p.y = 0;
           this.projectile = null;
@@ -613,6 +727,7 @@ export class HoleEngine {
         const mw = this.roomW / 2 - 0.4, md = this.roomD / 2 - 0.4;
         if (p.x < -mw || p.x > mw) { p.vx *= -0.5; p.x = Math.max(-mw, Math.min(mw, p.x)); }
         if (p.z < -md || p.z > md) { p.vz *= -0.5; p.z = Math.max(-md, Math.min(md, p.z)); }
+        if (p.vy < 0 && this._deviceIntercept(p)) return;
         // if it comes down over the hole, it just falls in — gravity!
         if (p.y <= 0.1 && p.vy < 0) {
           const d = Math.hypot(p.x - h.x, p.z - h.z);
@@ -644,9 +759,54 @@ export class HoleEngine {
     }
   }
 
+  // trampoline bounce & slide-platform catch for anything coming down
+  _deviceIntercept(p) {
+    for (const q of this.props) {
+      const dev = q.desc.device;
+      if (!dev || p === q) continue;
+      if (dev.type === 'tramp') {
+        const d = Math.hypot(p.x - q.x, p.z - q.z);
+        if (d < q.desc.topR && p.y <= dev.topY + 0.1 && p.y > dev.topY - 0.4) {
+          p.y = dev.topY;
+          p.vy = Math.max(-p.vy * 0.9, 6.4);
+          p.vx = p.vx * 0.9 + (this.rand() - 0.5) * 0.7;
+          p.vz = p.vz * 0.9 + (this.rand() - 0.5) * 0.7;
+          p.squash = 0.4;
+          this.emit('tramp', p, { on: q.id });
+          return true;
+        }
+      } else if (dev.type === 'slide') {
+        const top = this._deviceWorld(q, dev.topX, 0);
+        const d = Math.hypot(p.x - top.x, p.z - top.z);
+        if (d < 0.7 && Math.abs(p.y - dev.topH) < 0.5) {
+          p.state = S.SLIDING; p.t = 0; p._slideT = 0; p._deviceId = q.id;
+          p.vx = 0; p.vy = 0; p.vz = 0;
+          this.emit('slideCatch', p);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // items on a shaken support creep toward the edge and drop off
   _rideSupport(p, sup, dt) {
     p.tiltX *= Math.exp(-8 * dt); p.tiltZ *= Math.exp(-8 * dt);
+    // slide platform: shaking sends riders down the chute one by one
+    if (sup.desc.device && sup.desc.device.type === 'slide') {
+      if (sup.shakeT > 0.3) {
+        if (p._slideDelay == null) p._slideDelay = (p._slideQueue || 0) * 0.7;
+        p._slideDelay -= dt;
+        p.wobble = Math.max(p.wobble, 0.5);
+        if (p._slideDelay <= 0) {
+          p.supportId = null;
+          p.state = S.SLIDING; p.t = 0; p._slideT = 0; p._deviceId = sup.id;
+          this.emit('slideStartRun', p);
+        }
+      }
+      p.x = sup.x + p.slideOx; p.z = sup.z + p.slideOz;
+      return;
+    }
     if (sup.shakeT > 0.05 && sup.desc.topR) {
       const r0 = Math.hypot(p.slideOx, p.slideOz);
       let dirx, dirz;
@@ -665,6 +825,11 @@ export class HoleEngine {
         p.vz = dirz * (0.8 + this.rand() * 0.5);
         p.vy = 0.3;
         p.spin = 2 + this.rand() * 3; p.spinAxis = this._randAxis();
+        if (p.desc.walker) {
+          p._evicted = (p._evicted || 0) + 1;   // the cat gets tired of this
+          if (p._evicted >= 2) p._tired = true;
+          this.emit('catEvicted', p);
+        }
         this.emit('slideOff', p);
         return;
       }
@@ -678,11 +843,29 @@ export class HoleEngine {
   _updateFixture(p, dt) {
     const h = this.hole;
     const d = Math.hypot(p.x - h.x, p.z - h.z);
-    if (d < p.desc.footInR + h.r * 0.6) {
+    if (d < p.desc.footInR + h.r * 0.6 + 0.3) {
       p.shakeT = Math.min(1.2, p.shakeT + dt * 3);
       p._rattleT -= dt;
       if (p._rattleT <= 0) { p._rattleT = 0.3; this.emit('shakeRattle', p); }
       p.wobble = Math.max(p.wobble, 0.4);
+      // the cupboard bursts open and dumps its treasure once
+      const dev = p.desc.device;
+      if (dev && dev.type === 'cupboard' && !dev.open) {
+        dev.open = true;
+        this.emit('cupboardOpen', p);
+        const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+        let i = 0;
+        for (const q of this.props) {
+          if (q.supportId !== p.id || q.state !== S.REST) continue;
+          q.supportId = null;
+          q.state = S.TOSSED; q.t = -(i * 0.09); q.bounces = 0;
+          q.vx = -s * dev.face * (2.0 + this.rand()) + (this.rand() - 0.5) * 1.4;
+          q.vz = c * dev.face * (2.0 + this.rand()) + (this.rand() - 0.5) * 1.4;
+          q.vy = 2.6 + this.rand() * 2;
+          q.spin = 4 + this.rand() * 5; q.spinAxis = this._randAxis();
+          i++;
+        }
+      }
     }
   }
 
@@ -712,12 +895,61 @@ export class HoleEngine {
       return;
     }
 
-    const fleeR = 2.1 + h.r * 0.7;
+    const fleeR = (w.kind === 'cat' ? 3.4 : 2.1) + h.r * 0.7;
     let speed, hx, hz;
     if (d < fleeR) {
-      // flee straight away from the hole, hugging away from walls
       p.fleeing = true;
       p.peckT = 0;
+
+      // stamina: nobody can run forever — they stop and pant, catchably
+      p._fleeT = (p._fleeT || 0) + dt;
+      if ((p._pantT || 0) > 0) {
+        p._pantT -= dt;
+        p.y = 0;
+        p.tiltZ = Math.sin(p.t * 10) * 0.06;   // heaving little chest
+        return;
+      }
+      if (p._fleeT > 2.6) {
+        p._fleeT = 0;
+        p._pantT = 1.15;
+        this.emit('pant', p);
+        return;
+      }
+
+      // the cat sprints for high ground instead of just running
+      if (w.kind === 'cat' && !p._tired) {
+        let perch = null, best = 6;
+        for (const q of this.props) {
+          if (q === p || q.state === S.GONE || !q.desc.topR || q.desc.topR < 0.2) continue;
+          if (q.desc.device && q.desc.device.type === 'tramp') continue;
+          const qd = Math.hypot(q.x - p.x, q.z - p.z);
+          if (qd < best) { best = qd; perch = q; }
+        }
+        if (perch) {
+          const ta = Math.atan2(perch.z - p.z, perch.x - p.x);
+          p.heading += this._angleTo(p.heading, ta) * Math.min(1, 10 * dt);
+          if (best < 0.95) {
+            // boing! up onto the furniture, out of reach
+            p.supportId = perch.id;
+            p.state = S.REST; p.t = 0;
+            const a = this.rand() * Math.PI * 2;
+            p.slideOx = Math.cos(a) * perch.desc.topR * 0.3;
+            p.slideOz = Math.sin(a) * perch.desc.topR * 0.3;
+            p.x = perch.x + p.slideOx; p.z = perch.z + p.slideOz;
+            p.y = perch.desc.topY;
+            p.tiltX = 0; p.tiltZ = 0;
+            this.emit('catJump', p);
+            return;
+          }
+          p.x += Math.cos(p.heading) * 3.4 * dt;
+          p.z += Math.sin(p.heading) * 3.4 * dt;
+          p.yaw = -p.heading + Math.PI / 2;
+          p.y = Math.abs(Math.sin(p.hopPhase)) * 0.1;
+          return;
+        }
+      }
+
+      // flee straight away from the hole, hugging away from walls
       const ax = (p.x - h.x) / (d || 1e-4), az = (p.z - h.z) / (d || 1e-4);
       let tx = ax, tz = az;
       const mw = this.roomW / 2 - 1, md = this.roomD / 2 - 1;
@@ -725,11 +957,13 @@ export class HoleEngine {
       if (p.z + tz > md || p.z + tz < -md) tz = -tz * 0.3;
       const ta = Math.atan2(tz, tx);
       p.heading += this._angleTo(p.heading, ta) * Math.min(1, 9 * dt);
-      speed = w.flee || 2.2;
+      speed = p._tired ? 0.8 : (w.flee || 2.2);
+      if (w.kind === 'dog') p.heading += Math.sin(p.t * 8) * 1.6 * dt;   // zigzag
       p._cryT = (p._cryT || 0) - dt;
       if (p._cryT <= 0) { p._cryT = 0.5 + this.rand() * 0.4; this.emit('walkerCry', p); }
     } else {
       p.fleeing = false;
+      p._fleeT = 0;
       // stroll: follow the parent, or amble between waypoints with pecks
       if (p.followId) {
         const lead = this.byId.get(p.followId);
@@ -741,6 +975,42 @@ export class HoleEngine {
           p.heading += this._angleTo(p.heading, ta) * Math.min(1, 6 * dt);
           speed = dd > 1.4 ? p.walkSpeed * 1.6 : dd > 0.3 ? p.walkSpeed : 0;
         } else { speed = 0; }
+      } else if (w.kind === 'dog') {
+        // puppies live to poke balls around the room
+        p._nudgeCd = (p._nudgeCd || 0) - dt;
+        let ball = null, best = 4.5;
+        if (p._nudgeCd <= 0) {
+          for (const q of this.props) {
+            if (q.state !== S.REST || q.desc.kind !== 'ball') continue;
+            const qd = Math.hypot(q.x - p.x, q.z - p.z);
+            if (qd < best) { best = qd; ball = q; }
+          }
+        }
+        if (ball) {
+          const ta = Math.atan2(ball.z - p.z, ball.x - p.x);
+          p.heading += this._angleTo(p.heading, ta) * Math.min(1, 6 * dt);
+          speed = p.walkSpeed * 1.4;
+          if (best < p.desc.footInR + ball.desc.footInR + 0.1) {
+            ball.state = S.TOSSED; ball.t = 0; ball.bounces = 2;
+            ball.vx = Math.cos(p.heading) * 2.4;
+            ball.vz = Math.sin(p.heading) * 2.4;
+            ball.vy = 1.4;
+            ball.spin = 5; ball.spinAxis = this._randAxis();
+            p._nudgeCd = 2.5 + this.rand() * 2;
+            this.emit('dogNudge', p);
+          }
+        } else {
+          p.peckT -= dt;
+          if (p.peckT <= 0) {
+            p.peckT = 2 + this.rand() * 2.5;
+            const mw = this.roomW / 2 - 2, md = this.roomD / 2 - 2;
+            p.waypointX = (this.rand() * 2 - 1) * mw;
+            p.waypointZ = (this.rand() * 2 - 1) * md;
+          }
+          const ta = Math.atan2(p.waypointZ - p.z, p.waypointX - p.x);
+          p.heading += this._angleTo(p.heading, ta) * Math.min(1, 4 * dt);
+          speed = p.walkSpeed;
+        }
       } else {
         p.peckT -= dt;
         if (p.peckT <= 0) {

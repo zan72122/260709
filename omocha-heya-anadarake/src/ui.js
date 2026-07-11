@@ -26,6 +26,24 @@ export class UI {
     const play = this._el('button', 'big-btn play-btn', '▶ あそぶ', this.title);
     play.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.h.onPlay(); });
 
+    // ---- stage select: two big picture cards, zero reading required
+    this.select = this._el('div', 'screen select-screen hidden');
+    this._el('div', 'select-title', 'どこで あそぶ?', this.select);
+    const grid = this._el('div', 'stage-grid', '', this.select);
+    this.stageCards = [];
+    const stages = [
+      { emoji: '🧸', name: 'おもちゃのへや' },
+      { emoji: '🛝', name: 'あそびのへや' },
+    ];
+    stages.forEach((s, i) => {
+      const card = this._el('button', 'stage-card', '', grid);
+      this._el('div', 'stage-emoji', s.emoji, card);
+      this._el('div', 'stage-name', s.name, card);
+      const crowns = this._el('div', 'stage-stars', '', card);
+      card.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.h.onStage(i); });
+      this.stageCards.push({ card, crowns });
+    });
+
     // ---- HUD
     this.hud = this._el('div', 'hud hidden');
     const top = this._el('div', 'hud-top', '', this.hud);
@@ -38,6 +56,8 @@ export class UI {
     });
     this.crowns = this._el('div', 'crown-row', '', top);
     const right = this._el('div', 'hud-right', '', top);
+    this.homeBtn = this._el('button', 'icon-btn', '🗺️', right);
+    this.homeBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.h.onHome(); });
     this.resetBtn = this._el('button', 'icon-btn', '↻', right);
     this.resetBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.confirm.classList.remove('hidden'); });
 
@@ -82,12 +102,24 @@ export class UI {
 
   showTitle() {
     this.title.classList.remove('hidden');
+    this.select.classList.add('hidden');
     this.hud.classList.add('hidden');
     this.celebrate.classList.add('hidden');
   }
 
+  showSelect(stageClears = [0, 0]) {
+    this.title.classList.add('hidden');
+    this.select.classList.remove('hidden');
+    this.hud.classList.add('hidden');
+    this.celebrate.classList.add('hidden');
+    this.stageCards.forEach((c, i) => {
+      c.crowns.textContent = '👑'.repeat(Math.min(stageClears[i] || 0, 5));
+    });
+  }
+
   showGame() {
     this.title.classList.add('hidden');
+    this.select.classList.add('hidden');
     this.hud.classList.remove('hidden');
     this.celebrate.classList.add('hidden');
   }

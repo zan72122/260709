@@ -258,5 +258,141 @@ const has = (evs, type, pred = () => true) => evs.some((e) => e.type === type &&
   check(duck.state === S.GONE, 'water: duck finally swallowed');
 }
 
+// ================================================================ v4
+// ---------------------------------------------------------------- すべり台
+{
+  const eng = makeEngine(0.5, 0, 0);
+  const slide = eng.addProp(makeDesc('slide', 3.4, 2.3, 1.0, {
+    fixture: true, topR: 0.5, topY: 1.95,
+    device: { type: 'slide', topX: -0.95, exitX: 1.6, topH: 1.95, exitH: 0.45, lean: 0.55 },
+  }), 0, 0);
+  const rider = eng.addProp(makeDesc('ball', 0.4, 0.4, 0.4, { round: true }), -0.95, 0,
+    { y: 1.99, supportId: slide.id });
+  rider._slideQueue = 0;
+  const evs = run(eng, 5);   // hole parked under the slide → rattle → whoosh
+  check(has(evs, 'slideStartRun'), 'slide: shaking sends the rider down the chute');
+  check(has(evs, 'slideExit'), 'slide: rider flies off the end');
+  check(rider.supportId === null && rider.state !== S.GONE || rider.state === S.GONE,
+    'slide: rider left the platform');
+  if (rider.state !== S.GONE) chase(eng, rider, 5);
+  check(rider.state === S.GONE, 'slide: rider gets eaten after the ride');
+}
+
+// ---------------------------------------------------------------- シーソー
+{
+  const eng = makeEngine(0.5, 5, 5);
+  const ss = eng.addProp(makeDesc('seesaw', 2.6, 1.1, 0.55, {
+    topR: 0.45, topY: 1.15,
+    device: { type: 'seesaw', lowerId: 0, upperId: 0, launchDir: 1, flipped: false },
+  }), 0, 0);
+  const low = eng.addProp(makeDesc('drum', 0.64, 0.42, 0.64, { round: true }), -1.1, 0);
+  const high = eng.addProp(makeDesc('ball', 0.5, 0.5, 0.5, { round: true }), 1.1, 0,
+    { y: 1.15, supportId: ss.id });
+  ss.desc.device.lowerId = low.id;
+  ss.desc.device.upperId = high.id;
+  const evs = chase(eng, low, 4);        // eat the low toy…
+  check(low.state === S.GONE, 'seesaw: low toy eaten');
+  check(has(evs, 'seesawFlip'), 'seesaw: plank flips');
+  check(has(evs, 'catapult'), 'seesaw: high toy catapulted');
+  check(high.supportId === null, 'seesaw: high toy is airborne/dynamic');
+  chase(eng, high, 6);
+  check(high.state === S.GONE, 'seesaw: launched toy hunted down');
+}
+
+// ---------------------------------------------------------------- とだな
+{
+  const eng = makeEngine(0.5, 6, 0);
+  const cb = eng.addProp(makeDesc('cupboard', 1.7, 1.9, 0.75, {
+    fixture: true, topR: 0, topY: 1.9,
+    device: { type: 'cupboard', open: false, face: 1 },
+  }), 0, 0);
+  const t1 = eng.addProp(makeDesc('ball', 0.36, 0.36, 0.36, { round: true }), 0, 0.2, { y: 0.28, supportId: cb.id });
+  const t2 = eng.addProp(makeDesc('dice', 0.3, 0.3, 0.3), 0, -0.2, { y: 0.9, supportId: cb.id });
+  eng.setHoleTarget(0, 0);               // roll up to the cupboard
+  const evs = run(eng, 4);
+  check(has(evs, 'cupboardOpen'), 'cupboard: doors burst open');
+  check(t1.supportId === null && t2.supportId === null, 'cupboard: treasure dumped out');
+  for (const t of [t1, t2]) if (t.state !== S.GONE) chase(eng, t, 5);
+  check(t1.state === S.GONE && t2.state === S.GONE, 'cupboard: treasure eaten');
+  check(cb.state !== S.GONE, 'cupboard: the cabinet itself stays bolted');
+}
+
+// ---------------------------------------------------------------- トランポリン
+{
+  const eng = makeEngine(0.5, 6, 6);
+  eng.addProp(makeDesc('trampoline', 1.74, 0.42, 1.74, {
+    round: true, fixture: true, topR: 0.75, topY: 0.38,
+    device: { type: 'tramp', topY: 0.38 },
+  }), 0, 0);
+  const ball = eng.addProp(makeDesc('ball', 0.4, 0.4, 0.4, { round: true }), 0.1, 0, { state: 'tossed' });
+  ball.y = 2; ball.vy = -1; ball.bounces = 0;
+  const evs = run(eng, 3);
+  check(evs.filter((e) => e.type === 'tramp').length >= 2, 'tramp: the ball keeps bouncing');
+  check(ball.state === S.TOSSED, 'tramp: never settles while on the trampoline');
+  chase(eng, ball, 25);                   // drift off, land, get eaten
+  check(ball.state === S.GONE, 'tramp: caught once it hops off');
+}
+
+// ---------------------------------------------------------------- レール
+{
+  const eng = makeEngine(0.5, 0, 5);
+  eng.addProp(makeDesc('rail', 0.6, 3.3, 0.6, {
+    fixture: true,
+    device: { type: 'rail', fromX: -4, fromZ: -6, toX: 4, toZ: -6, h: 2.7 },
+  }), 0, -6);
+  const ball = eng.addProp(makeDesc('ball', 0.3, 0.3, 0.3, { round: true }), -4, -6, { state: 'launched' });
+  ball.y = 3.0; ball.vy = -0.5; ball.vx = 0; ball.vz = 0;
+  const evs = run(eng, 6);
+  check(has(evs, 'railCatch'), 'rail: lobbed ball lands in the hopper');
+  check(has(evs, 'railTick'), 'rail: rolls along clicking');
+  check(has(evs, 'railDrop'), 'rail: drops off the far end');
+  check(Math.abs(ball.x - 4) < 1.5, `rail: came out near the far end (x=${ball.x.toFixed(1)})`);
+}
+
+// ---------------------------------------------------------------- いぬ
+{
+  const eng = makeEngine(0.4, 8, 8);
+  const dog = eng.addProp(makeDesc('dog', 0.62, 0.72, 0.46, {
+    round: true, walker: { kind: 'dog', speed: 1.4, flee: 2.6 },
+  }), 0, 0);
+  const ball = eng.addProp(makeDesc('ball', 0.4, 0.4, 0.4, { round: true }), 1.2, 0);
+  const bx = ball.x;
+  const evs = run(eng, 6);
+  check(has(evs, 'dogNudge'), 'dog: pokes the ball');
+  check(Math.hypot(ball.x - bx, ball.z) > 0.3 || ball.state !== S.REST, 'dog: the ball actually moved');
+  const evs2 = chase(eng, dog, 8);
+  check(dog.state === S.GONE && has(evs2, 'catchWalker'), 'dog: cornered and caught');
+}
+
+// ---------------------------------------------------------------- ねこ
+{
+  const eng = makeEngine(0.45, 6, 0);
+  const cat = eng.addProp(makeDesc('cat', 0.56, 0.66, 0.4, {
+    round: true, walker: { kind: 'cat', speed: 0.7, flee: 2.4 },
+  }), 0, 0);
+  // a bolted shelf: the perch itself cannot be eaten, only shaken
+  const shelf = eng.addProp(
+    makeDesc('wallshelf', 2.3, 2.0, 0.6, { fixture: true, topR: 0.8, topY: 1.96 }), 1.8, 0);
+  let evs = chase(eng, cat, 3);
+  check(has(evs, 'catJump'), 'cat: leaps onto the shelf when chased');
+  check(cat.supportId === shelf.id || has(evs, 'catEvicted'),
+    'cat: made it up out of reach');
+  // keep rattling the shelf until she has been thrown off
+  eng.setHoleTarget(shelf.x, shelf.z);
+  const evs2 = run(eng, 8);
+  check(has(evs, 'catEvicted') || has(evs2, 'catEvicted'), 'cat: shaken off her perch');
+  evs = chase(eng, cat, 14);
+  check(cat.state === S.GONE, 'cat: a tired cat can finally be caught');
+}
+
+// ---------------------------------------------------------------- げっぷ
+{
+  const eng = makeEngine(1.6, 0, 0);
+  eng.addProp(makeDesc('chair', 1.4, 1.1, 1.4), 0.05, 0);
+  const evs = run(eng, 5);
+  check(has(evs, 'swallow'), 'burp: big chair swallowed');
+  check(has(evs, 'burp'), 'burp: the hole burps after a big meal');
+}
+
 console.log(ok ? 'PHYSICS PASS' : 'PHYSICS FAIL');
 process.exit(ok ? 0 : 1);

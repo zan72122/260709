@@ -29,9 +29,9 @@ const audio = new AudioEngine();
 
 // ------------------------------------------------------------ state
 const state = {
-  mode: 'title',          // title | game | celebrate
-  round: 0,
-  crowns: Number(localStorage.getItem('anadarake-crowns') || 0),
+  mode: 'title',          // title | select | game | dive | celebrate
+  stage: 0,               // 0: toy room, 1: playroom
+  clears: JSON.parse(localStorage.getItem('anadarake-clears') || '[0,0]'),
   engine: null,
   entries: [],            // [{prop, group, built}]
   total: 1,
@@ -39,8 +39,12 @@ const state = {
   idleT: 0,
   everTapped: false,
   confettiT: 0,
-  fallWhooshT: 0,
+  diveT: 0,
 };
+state.round = 0; // legacy alias (palette index derived per stage)
+Object.defineProperty(state, 'crowns', {
+  get() { return (this.clears[0] || 0) + (this.clears[1] || 0); },
+});
 
 // soft round contact shadow, shared texture + per-prop material
 const blobTex = (() => {
@@ -67,22 +71,60 @@ function attachShadow(e) {
   e.shadow = m;
 }
 
+// ---- the world at the bottom of the hole: everything you drop piles up
+const pileGroup = new THREE.Group();
+pileGroup.position.set(0, -10.6, 0);
+scene.add(pileGroup);
+{
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(5, 36),
+    new THREE.MeshBasicMaterial({ color: '#3a2b3f' })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  pileGroup.add(ground);
+  // fairy lights around the nest
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const bulb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 8, 6),
+      new THREE.MeshBasicMaterial({ color: ['#ffd166', '#ff8fa3', '#8ce99a', '#6cc5ff'][i % 4] })
+    );
+    bulb.position.set(Math.cos(a) * 3.4, 0.4 + Math.sin(i * 2.3) * 0.2, Math.sin(a) * 3.4);
+    pileGroup.add(bulb);
+  }
+}
+let pileItems = [];
+let pileCount = 0;
+const pileQueue = [];
+
+function clearPile() {
+  for (const m of pileItems) pileGroup.remove(m);
+  pileItems = [];
+  pileCount = 0;
+  pileQueue.length = 0;
+  effects.floorY = 0;
+}
+
 function buildLevel() {
   for (const e of state.entries) {
     scene.remove(e.group);
+    pileGroup.remove(e.group);
     if (e.shadow) scene.remove(e.shadow);
   }
   state.entries = [];
+  clearPile();
 
-  room.build(state.round);
+  const palette = state.clears[state.stage] % 3;
+  state.round = palette;
+  room.build(palette);
 
   const eng = new HoleEngine({
     roomW: ROOM_W - 1.2, roomD: ROOM_D - 1.2,
     holeR: 0.42, holeX: 0, holeZ: 2.5,
-    seed: 1000 + state.round * 77,
+    seed: 1000 + palette * 77 + state.stage * 13,
   });
-  const rand = mulberry32(500 + state.round * 31);
-  state.entries = buildRound(scene, eng, state.round, rand);
+  const rand = mulberry32(500 + palette * 31 + state.stage * 7);
+  state.entries = buildRound(scene, eng, palette, rand, state.stage);
   for (const e of state.entries) attachShadow(e);
   state.engine = eng;
   state.total = eng.remaining();
@@ -95,10 +137,22 @@ function buildLevel() {
 const ui = new UI(document.getElementById('ui'), {
   onPlay() {
     audio.unlock();
+    state.mode = 'select';
+    ui.showSelect(state.clears);
+  },
+  onStage(i) {
+    audio.unlock();
+    state.stage = i;
+    buildLevel();
     state.mode = 'game';
     ui.showGame();
     ui.showHint(true);
     state.idleT = 0;
+  },
+  onHome() {
+    audio.unlock();
+    state.mode = 'select';
+    ui.showSelect(state.clears);
   },
   onLaunch() {
     audio.unlock();
@@ -112,10 +166,8 @@ const ui = new UI(document.getElementById('ui'), {
   },
   onSoundToggle(on) { audio.unlock(); audio.setEnabled(on); },
   onNext() {
-    state.round++;
-    buildLevel();
-    state.mode = 'game';
-    ui.showGame();
+    state.mode = 'select';
+    ui.showSelect(state.clears);
   },
 });
 
@@ -140,18 +192,67 @@ function fitCamera() {
 }
 
 const camTarget = new THREE.Vector3(0, 0, 2.5);
+const _lookA = new THREE.Vector3();
+const _posA = new THREE.Vector3();
 function updateCamera(dt) {
-  const playing = state.mode === 'game';
   const h = state.engine ? state.engine.hole : { x: 0, z: 0, r: 0.5 };
+  const sx = (Math.random() - 0.5) * state.shake;
+  const sy = (Math.random() - 0.5) * state.shake;
+  state.shake *= Math.exp(-6 * dt);
 
-  let az, el, wantDist, lookY;
-  if (playing) {
+  if (state.mode === 'dive' || state.mode === 'celebrate') {
+    // the grand finale: dive into the hole down to the bottom world
+    const t = state.diveT;
+    const diveEl = THREE.MathUtils.degToRad(60);
+    _posA.set(
+      h.x + Math.sin(cam.az) * Math.cos(diveEl) * 4.5,
+      Math.sin(diveEl) * 4.5,
+      h.z + Math.cos(cam.az) * Math.cos(diveEl) * 4.5
+    );
+    if (state.mode === 'dive' && t < 1.0) {
+      // swoop in over the mouth of the hole
+      const k = t / 1.0;
+      const d = cam.dist + (4.5 - cam.dist) * k;
+      const e = cam.el + (diveEl - cam.el) * k;
+      camera.position.set(
+        h.x + Math.sin(cam.az) * Math.cos(e) * d,
+        Math.sin(e) * d,
+        h.z + Math.cos(cam.az) * Math.cos(e) * d
+      );
+      camera.lookAt(h.x, 0.3 - k * 2, h.z);
+    } else if (state.mode === 'dive') {
+      // plunge through the shaft, below its mouth, out into the cavern
+      const k = Math.min(1, (t - 1.0) / 1.5);
+      const e2 = k * k * (3 - 2 * k);
+      camera.position.set(
+        _posA.x + (h.x + 0.3 - _posA.x) * e2,
+        _posA.y + (-8.4 - _posA.y) * e2,
+        _posA.z + (h.z + 4.8 - _posA.z) * e2
+      );
+      _lookA.set(h.x, -1.5 - e2 * 8.6, h.z);
+      camera.lookAt(_lookA);
+    } else {
+      // drift around the treasure pile in the bottom world
+      cam.autoAz += dt * 0.18;
+      const d = 6.8;
+      camera.position.set(
+        h.x + Math.sin(cam.autoAz) * d + sx,
+        -8.35,
+        h.z + Math.cos(cam.autoAz) * d
+      );
+      camera.lookAt(h.x, -10.1, h.z);
+    }
+    return;
+  }
+
+  let az, el, wantDist;
+  if (state.mode === 'game') {
     camTarget.x += (h.x - camTarget.x) * Math.min(1, 4.5 * dt);
     camTarget.z += (h.z - camTarget.z) * Math.min(1, 4.5 * dt);
     az = cam.az; el = cam.el;
     wantDist = (6.6 + h.r * 3.4) * cam.zoom * (camera.userData.portrait ? 1.35 : 1);
   } else {
-    // title / celebration: drift around the whole room
+    // title / select: drift around the whole room
     cam.autoAz += dt * 0.1;
     camTarget.x += (0 - camTarget.x) * Math.min(1, 2 * dt);
     camTarget.z += (0.5 - camTarget.z) * Math.min(1, 2 * dt);
@@ -160,8 +261,6 @@ function updateCamera(dt) {
   }
   cam.dist += (THREE.MathUtils.clamp(wantDist, 4.5, 26) - cam.dist) * Math.min(1, 3 * dt);
 
-  const sx = (Math.random() - 0.5) * state.shake;
-  const sy = (Math.random() - 0.5) * state.shake;
   const ce = Math.cos(el), se = Math.sin(el);
   camera.position.set(
     camTarget.x + Math.sin(az) * ce * cam.dist + sx,
@@ -169,7 +268,6 @@ function updateCamera(dt) {
     camTarget.z + Math.cos(az) * ce * cam.dist
   );
   camera.lookAt(camTarget.x, 0.45, camTarget.z);
-  state.shake *= Math.exp(-6 * dt);
 }
 window.addEventListener('resize', fitCamera);
 fitCamera();
@@ -287,8 +385,72 @@ function handleEvents(eng) {
         effects.confettiBurst(eng.hole.x, eng.hole.z, 24);
         effects.swallowSparkle(eng.hole.x, eng.hole.z, 0.5, '#fff3b0');
         break;
-      case 'walkerCry': audio.piyo(p && p.desc.kind === 'hen'); break;
+      case 'walkerCry':
+        if (p && p.desc.walker.kind === 'dog') audio.bark();
+        else if (p && p.desc.walker.kind === 'cat') audio.meow();
+        else audio.piyo(p && p.desc.kind === 'hen');
+        break;
       case 'peck': audio.peck(); break;
+      case 'pant':
+        audio.pant();
+        if (p) effects.dust(p.x, p.z, 0.3, '#ffffff');
+        break;
+      case 'dogNudge': audio.bark(); break;
+      case 'catJump': audio.meow(); audio.boing(0.3); break;
+      case 'catEvicted': audio.meow(true); break;
+      case 'seesawFlip': {
+        audio.seesaw();
+        const e = state.entries.find((en) => en.prop === p);
+        if (e && e.group.userData.plank) {
+          tweens.push({
+            t: 0, dur: 0.3, obj: e.group.userData.plank,
+            fn(o, k) { o.rotation.z = 0.3 - 0.6 * (k < 0.8 ? k / 0.8 * 1.15 : 1.15 - (k - 0.8)
+              / 0.2 * 0.15); },
+          });
+        }
+        state.shake = Math.max(state.shake, 0.12);
+        break;
+      }
+      case 'catapult': audio.launch(); break;
+      case 'cupboardOpen': {
+        audio.doorBang();
+        state.shake = Math.max(state.shake, 0.15);
+        const e = state.entries.find((en) => en.prop === p);
+        if (e && e.group.userData.doors) {
+          for (const door of e.group.userData.doors) {
+            tweens.push({
+              t: 0, dur: 0.45, obj: door,
+              fn(o, k) { o.rotation.y = o.userData.openAngle * (k < 0.7 ? k / 0.7 * 1.2 : 1.2 - (k - 0.7) / 0.3 * 0.2); },
+            });
+          }
+        }
+        if (p) effects.dust(p.x, p.z, 1.4);
+        break;
+      }
+      case 'tramp': {
+        audio.boing(0.25);
+        const src = eng.byId.get(ev.on);
+        const e = state.entries.find((en) => en.prop === src);
+        if (e && e.group.userData.surface) {
+          tweens.push({
+            t: 0, dur: 0.25, obj: e.group.userData.surface,
+            fn(o, k) { o.scale.y = 1 - Math.sin(k * Math.PI) * 0.6; },
+          });
+        }
+        break;
+      }
+      case 'slideStartRun': case 'slideCatch': audio.whee(); break;
+      case 'slideExit': audio.whoosh(0.3); if (p) effects.dust(p.x, p.z, 0.5); break;
+      case 'railCatch': audio.tick(); audio.boing(0.2); break;
+      case 'railTick': audio.tick(); break;
+      case 'railDrop': audio.whoosh(0.2); break;
+      case 'burp': {
+        audio.burp();
+        eng.hole.rVel += 1.6;   // the rim ripples with the burp
+        effects.swallowSparkle(eng.hole.x, eng.hole.z, 0.4, '#c9f2ff');
+        break;
+      }
+      case 'burpSpit': audio.popOut(sz); break;
       case 'teeter': audio.teeter(); break;
       case 'settle': audio.boing(sz); break;
       case 'stuckStart':
@@ -316,6 +478,9 @@ function handleEvents(eng) {
         effects.swallowSparkle(eng.hole.x, eng.hole.z, ev.sizeClass);
         effects.ring(eng.hole.x, eng.hole.z, eng.hole.r * 0.6, eng.hole.r * 1.5, 0.4, '#ffe9b8');
         if (ev.sizeClass > 0.8) state.shake = Math.max(state.shake, 0.3);
+        // …and a moment later it lands on the treasure pile down below
+        const e = state.entries.find((en) => en.prop === p);
+        if (e) pileQueue.push({ e, t: 0.7 });
         break;
       }
       case 'splash': audio.splash(); effects.splash(eng.hole.x, eng.hole.z); break;
@@ -378,7 +543,11 @@ function handleEvents(eng) {
 // point at off-screen toys so the zoomed-in camera never loses the child
 const markerVec = new THREE.Vector3();
 function emojiFor(p) {
-  if (p.desc.walker) return p.desc.kind === 'hen' ? '🐔' : '🐤';
+  if (p.desc.walker) {
+    if (p.desc.walker.kind === 'dog') return '🐶';
+    if (p.desc.walker.kind === 'cat') return '🐱';
+    return p.desc.kind === 'hen' ? '🐔' : '🐤';
+  }
   if (p.desc.balloon) return '🎈';
   if (p.desc.waterSource) return '🛁';
   return '🧸';
@@ -415,6 +584,56 @@ function updateEdgeMarkers() {
   ui.updateMarkers(items);
 }
 
+// small visual tweens (cupboard doors, seesaw plank, trampoline squash)
+const tweens = [];
+function updateTweens(dt) {
+  for (let i = tweens.length - 1; i >= 0; i--) {
+    const tw = tweens[i];
+    tw.t += dt;
+    const k = Math.min(1, tw.t / tw.dur);
+    tw.fn(tw.obj, k);
+    if (k >= 1) tweens.splice(i, 1);
+  }
+}
+
+// drop swallowed toys onto the bottom-world pile a beat later
+function placeInPile(e) {
+  const g = e.group;
+  pileGroup.add(g);
+  const r = Math.sqrt(Math.random()) * 1.7;
+  const a = Math.random() * Math.PI * 2;
+  const rr = r * 1.35;   // spread the treasure wide so it reads from the side
+  if (e.prop.desc.walker) {
+    // caught critters stand happily on top of the treasure
+    g.position.set(Math.cos(a) * rr, 0.5 + (2.3 - rr) * 0.3, Math.sin(a) * rr);
+    g.rotation.set(0, Math.random() * 6.28, 0);
+    if (g.userData.face) g.userData.face.set('normal');
+  } else {
+    g.position.set(Math.cos(a) * rr,
+      Math.max(0.03, (2.3 - rr) * 0.4 * Math.random() + pileCount * 0.012),
+      Math.sin(a) * rr);
+    g.rotation.set(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
+  }
+  g.scale.set(1, 1, 1);
+  g.visible = true;
+  pileCount++;
+  pileItems.push(g);
+  e.inPile = true;
+}
+
+function updatePile(dt) {
+  const h = state.engine ? state.engine.hole : { x: 0, z: 0 };
+  pileGroup.position.x += (h.x - pileGroup.position.x) * Math.min(1, 1.4 * dt);
+  pileGroup.position.z += (h.z - pileGroup.position.z) * Math.min(1, 1.4 * dt);
+  for (let i = pileQueue.length - 1; i >= 0; i--) {
+    const q = pileQueue[i];
+    q.t -= dt;
+    if (q.t > 0) continue;
+    pileQueue.splice(i, 1);
+    if (q.e.prop.state === S.GONE && !q.e.inPile) placeInPile(q.e);
+  }
+}
+
 // escaped balloons drifting up to the ceiling
 const flyingBalloons = [];
 function updateBalloons(dt) {
@@ -444,11 +663,17 @@ const spinAx = new THREE.Vector3();
 function syncMeshes(dt) {
   for (const e of state.entries) {
     const p = e.prop, g = e.group;
-    if (p.state === S.GONE) {
-      if (g.visible) {
-        g.visible = false;
-        if (e.shadow) e.shadow.visible = false;
+    if (e.inPile) {
+      if (p.state !== S.GONE) {          // launched or burped back up
+        scene.add(g);
+        e.inPile = false;
+      } else {
+        continue;                        // resting on the treasure pile
       }
+    }
+    if (p.state === S.GONE) {
+      if (g.visible) g.visible = false;
+      if (e.shadow) e.shadow.visible = false;
       continue;
     }
     g.position.set(p.x, p.y - p.sink, p.z);
@@ -472,6 +697,11 @@ function syncMeshes(dt) {
       const tumbling = p.state === S.TOPPLE || p.state === S.ENDTIP ||
         p.state === S.FALLING || p.state === S.STUCK || p.state === S.TOSSED;
       face.set(tumbling ? 'closed' : p.fear > 0.45 ? 'scared' : 'normal');
+    }
+    // wagging tails for the dog & cat
+    if (g.userData.tail && p.desc.walker) {
+      const wag = p.desc.walker.kind === 'dog' ? 0.55 : 0.25;
+      g.userData.tail.rotation.x = Math.sin(p.wobblePhase * 0.8 + p.id) * wag;
     }
 
     qYaw.setFromAxisAngle(axY, p.yaw);
@@ -504,7 +734,7 @@ function tick() {
   // hole visuals always track the engine, even behind the title screen
   if (state.engine) holeView.update(dt, state.engine.hole);
 
-  if (state.mode === 'game' || state.mode === 'celebrate') {
+  if (state.mode === 'game' || state.mode === 'dive' || state.mode === 'celebrate') {
     const eng = state.engine;
     eng.update(dt);
     handleEvents(eng);
@@ -520,24 +750,36 @@ function tick() {
       if (state.idleT > 12 && !pointerDown) { ui.showHint(true); }
 
       if (remaining === 0) {
-        state.mode = 'celebrate';
-        state.crowns++;
-        localStorage.setItem('anadarake-crowns', String(state.crowns));
+        // the grand dive down to the bottom world
+        state.mode = 'dive';
+        state.diveT = 0;
+        state.clears[state.stage] = (state.clears[state.stage] || 0) + 1;
+        localStorage.setItem('anadarake-clears', JSON.stringify(state.clears));
         audio.fanfare();
+        effects.floorY = -10.55;
         state.confettiT = 0;
         ui.setLaunchVisible(false);
-        setTimeout(() => ui.showCelebrate(state.crowns), 1400);
+        ui.showHint(false);
+      }
+    } else if (state.mode === 'dive') {
+      state.diveT += dt;
+      if (state.diveT > 2.9) {
+        state.mode = 'celebrate';
+        ui.showCelebrate(state.crowns);
       }
     } else {
-      // celebration confetti rains over the room
+      // confetti rains down onto the treasure pile
       state.confettiT -= dt;
       if (state.confettiT <= 0) {
-        state.confettiT = 0.55;
-        effects.confettiBurst((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 6, 40);
+        state.confettiT = 0.6;
+        effects.confettiBurst(eng.hole.x, eng.hole.z, 34, -7.6);
         audio.sparkle();
       }
     }
   }
+
+  updateTweens(dt);
+  updatePile(dt);
 
   effects.update(dt);
   updateBalloons(dt);

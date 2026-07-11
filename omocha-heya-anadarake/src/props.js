@@ -603,8 +603,206 @@ export function buildBalloonGift(boxColor, ribbonColor, balloonColor) {
   return { group: g, desc: makeDesc('gift', s, s, s, { balloon: true, name: 'gift' }) };
 }
 
+// --------------------------------------------------- v4: the contraptions
+export function buildSlide(color, accent) {
+  const g = new THREE.Group();
+  const m = mat(color);
+  // platform + ladder at local -x, chute sweeping down to +x
+  add(g, G('box', 0.9, 0.08, 0.9), m, -0.95, 1.9, 0);
+  for (const sz of [-0.38, 0.38]) {
+    add(g, G('box', 0.06, 1.9, 0.06), mat('#c9a077'), -1.3, 0.95, sz);
+    add(g, G('box', 0.06, 1.9, 0.06), mat('#c9a077'), -0.6, 0.95, sz);
+  }
+  for (let i = 0; i < 4; i++) {
+    add(g, G('box', 0.5, 0.05, 0.7), mat('#c9a077'), -1.3, 0.35 + i * 0.42, 0);
+  }
+  // chute: sloped from platform down to the lip
+  const chute = add(g, G('box', 2.4, 0.07, 0.72), mat(accent), 0.35, 1.15, 0);
+  chute.rotation.z = -0.58;
+  for (const sz of [-0.38, 0.38]) {
+    const rail = add(g, G('box', 2.4, 0.2, 0.05), m, 0.35, 1.28, sz);
+    rail.rotation.z = -0.58;
+  }
+  add(g, G('box', 0.6, 0.07, 0.72), mat(accent), 1.45, 0.42, 0);
+  // guard rails on the platform
+  add(g, G('box', 0.9, 0.3, 0.05), m, -0.95, 2.1, 0.43);
+  add(g, G('box', 0.9, 0.3, 0.05), m, -0.95, 2.1, -0.43);
+  return {
+    group: g,
+    desc: makeDesc('slide', 3.4, 2.3, 1.0, {
+      fixture: true, topR: 0.5, topY: 1.95, name: 'slide',
+      device: { type: 'slide', topX: -0.95, exitX: 1.6, topH: 1.95, exitH: 0.45, lean: 0.55 },
+    }),
+    topY: 1.95,
+  };
+}
+
+export function buildSeesaw(color, accent) {
+  const g = new THREE.Group();
+  add(g, G('box', 0.5, 0.45, 0.5), mat(accent), 0, 0.22, 0).rotation.z = Math.PI / 4;
+  const plank = new THREE.Group();
+  const pm = add(plank, G('box', 2.6, 0.08, 0.55), mat(color), 0, 0, 0);
+  add(plank, G('box', 0.1, 0.22, 0.55), mat(accent), -1.25, 0.12, 0);
+  add(plank, G('box', 0.1, 0.22, 0.55), mat(accent), 1.25, 0.12, 0);
+  plank.position.y = 0.42;
+  plank.rotation.z = 0.3;                     // -x end resting on the floor
+  g.add(plank);
+  g.userData.plank = plank;
+  return {
+    group: g,
+    desc: makeDesc('seesaw', 2.6, 1.1, 0.55, {
+      topR: 0.45, topY: 1.15, name: 'seesaw',
+      device: { type: 'seesaw', lowerId: 0, upperId: 0, launchDir: 1, flipped: false },
+    }),
+  };
+}
+
+export function buildCupboard(color, accent) {
+  const g = new THREE.Group();
+  add(g, G('box', 1.7, 1.9, 0.7), mat(color), 0, 0.95, 0);
+  add(g, G('box', 1.6, 0.06, 0.6), mat('#c9a077'), 0, 0.62, 0.02);
+  add(g, G('box', 1.6, 0.06, 0.6), mat('#c9a077'), 0, 1.24, 0.02);
+  // hinged doors (opened by main.js on the cupboardOpen event)
+  const doors = [];
+  for (const s of [-1, 1]) {
+    const door = new THREE.Group();       // hinge at the outer edge
+    add(door, G('box', 0.8, 1.7, 0.06), mat(accent), -s * 0.4, 0, 0);
+    add(door, G('sph', 0.05, 8, 6), mat('#ffe066'), -s * 0.72, 0, 0.06);
+    door.position.set(s * 0.82, 0.98, 0.36);
+    door.userData.openAngle = s * 2.1;
+    g.add(door);
+    doors.push(door);
+  }
+  g.userData.doors = doors;
+  return {
+    group: g,
+    desc: makeDesc('cupboard', 1.7, 1.9, 0.75, {
+      fixture: true, topR: 0, topY: 1.9, name: 'cupboard',
+      device: { type: 'cupboard', open: false, face: 1 },
+    }),
+  };
+}
+
+export function buildTrampoline(color, accent) {
+  const g = new THREE.Group();
+  const surface = add(g, G('cyl', 0.72, 0.72, 0.05, 22), mat(accent), 0, 0.33, 0);
+  g.userData.surface = surface;
+  add(g, G('tor', 0.78, 0.09, 10, 24), mat(color), 0, 0.33, 0, Math.PI / 2, 0, 0);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    add(g, G('cyl', 0.04, 0.05, 0.32, 8), mat('#8895a5'), Math.cos(a) * 0.62, 0.16, Math.sin(a) * 0.62);
+  }
+  return {
+    group: g,
+    desc: makeDesc('trampoline', 1.74, 0.42, 1.74, {
+      round: true, fixture: true, topR: 0.75, topY: 0.38, name: 'trampoline',
+      device: { type: 'tramp', topY: 0.38 },
+    }),
+  };
+}
+
+export function buildRail(color, from, to, h) {
+  const g = new THREE.Group();
+  const len = Math.hypot(to.x - from.x, to.z - from.z);
+  const cx = (from.x + to.x) / 2, cz = (from.z + to.z) / 2;
+  const yaw = Math.atan2(to.z - from.z, to.x - from.x);
+  const railM = mat(color);
+  for (const off of [-0.14, 0.14]) {
+    const r = add(g, G('cyl', 0.035, 0.035, 1, 8), railM, 0, h, off, 0, 0, Math.PI / 2);
+    r.scale.y = len;
+  }
+  for (let i = 0; i <= 3; i++) {
+    add(g, G('cyl', 0.05, 0.06, h, 8), mat('#c9a077'), -len / 2 + (len / 3) * i, h / 2, 0);
+  }
+  // entry funnel at the "from" end
+  const funnel = add(g, G('cone', 0.55, 0.6, 12, 1, true), mat('#ffd166'), -len / 2, h + 0.28, 0);
+  funnel.rotation.x = Math.PI;
+  g.position.set(cx, 0, cz);
+  g.rotation.y = -yaw;
+  return {
+    group: g,
+    desc: makeDesc('rail', 0.6, h + 0.6, 0.6, {
+      fixture: true, name: 'rail',
+      device: { type: 'rail', fromX: from.x, fromZ: from.z, toX: to.x, toZ: to.z, h },
+    }),
+    pos: { x: cx, z: cz },
+  };
+}
+
+export function buildWardrobe(color, accent) {
+  const g = new THREE.Group();
+  add(g, G('box', 2.0, 2.1, 0.85), mat(color), 0, 1.05, 0);
+  add(g, G('box', 0.05, 1.9, 0.02), mat('#ffffff'), 0, 1.05, 0.44);
+  for (const s of [-1, 1]) {
+    add(g, G('sph', 0.05, 8, 6), mat('#ffe066'), s * 0.14, 1.05, 0.45);
+    add(g, G('box', 0.85, 0.4, 0.02), mat(accent), s * 0.5, 1.75, 0.44);
+  }
+  return {
+    group: g,
+    desc: makeDesc('wardrobe', 2.0, 2.1, 0.85, { topR: 0.6, topY: 2.12, name: 'wardrobe' }),
+    topY: 2.12,
+  };
+}
+
+// --------------------------------------------------- v4: dog & cat
+export function buildDog(color = '#e8d3b0') {
+  const g = new THREE.Group();
+  const body = add(g, G('sph', 0.24, 14, 10), mat(color), 0, 0.28, 0);
+  body.scale.set(1.35, 0.95, 0.9);
+  add(g, G('sph', 0.17, 12, 10), mat(color), 0.3, 0.5, 0);
+  add(g, G('sph', 0.09, 10, 8), mat('#f7ede0'), 0.42, 0.44, 0).scale.set(1.2, 0.9, 0.9);
+  add(g, G('sph', 0.035, 8, 6), mat('#4a3428'), 0.51, 0.47, 0);
+  addFace(g, 0.07, 0.57, 0.13, 0.028);
+  for (const s of [-1, 1]) {
+    add(g, G('sph', 0.07, 8, 6), mat('#b98a5e'), s * 0.1, 0.62, -0.02).scale.set(0.6, 1.4, 0.8);
+  }
+  const tail = add(g, G('cyl', 0.03, 0.05, 0.26, 6), mat(color), -0.34, 0.42, 0, 0, 0, 1.0);
+  g.userData.tail = tail;
+  for (const sx of [-0.14, 0.2]) for (const sz of [-1, 1]) {
+    add(g, G('cyl', 0.045, 0.05, 0.16, 6), mat(color), sx, 0.08, sz * 0.11);
+  }
+  return {
+    group: g,
+    desc: makeDesc('dog', 0.62, 0.72, 0.46, {
+      round: true, name: 'puppy',
+      walker: { kind: 'dog', speed: 1.4, flee: 2.6 },
+    }),
+  };
+}
+
+export function buildCat(color = '#9aa5b1') {
+  const g = new THREE.Group();
+  const body = add(g, G('sph', 0.2, 14, 10), mat(color), 0, 0.24, 0);
+  body.scale.set(1.4, 0.95, 0.85);
+  add(g, G('sph', 0.15, 12, 10), mat(color), 0.28, 0.46, 0);
+  addFace(g, 0.065, 0.52, 0.11, 0.026);
+  add(g, G('cone', 0.045, 0.09, 4), mat(color), 0.2, 0.62, 0.06);
+  add(g, G('cone', 0.045, 0.09, 4), mat(color), 0.2, 0.62, -0.06);
+  add(g, G('sph', 0.025, 6, 5), mat('#f5a9b8'), 0.42, 0.44, 0);
+  const tail = add(g, G('cyl', 0.025, 0.035, 0.42, 6), mat(color), -0.3, 0.4, 0, 0, 0, 0.7);
+  g.userData.tail = tail;
+  add(g, G('box', 0.16, 0.03, 0.01), mat('#ffffff'), 0.44, 0.46, 0.08);
+  add(g, G('box', 0.16, 0.03, 0.01), mat('#ffffff'), 0.44, 0.46, -0.08);
+  for (const sx of [-0.12, 0.18]) for (const sz of [-1, 1]) {
+    add(g, G('cyl', 0.04, 0.045, 0.14, 6), mat(color), sx, 0.07, sz * 0.09);
+  }
+  return {
+    group: g,
+    desc: makeDesc('cat', 0.56, 0.66, 0.4, {
+      round: true, name: 'cat',
+      walker: { kind: 'cat', speed: 0.7, flee: 2.4 },
+    }),
+  };
+}
+
 // ------------------------------------------------------------- room layout
-export function buildRound(scene, engine, paletteIndex, rand) {
+export function buildRound(scene, engine, paletteIndex, rand, stage = 0) {
+  return stage === 1
+    ? layoutPlayRoom(scene, engine, paletteIndex, rand)
+    : layoutToyRoom(scene, engine, paletteIndex, rand);
+}
+
+function layoutToyRoom(scene, engine, paletteIndex, rand) {
   const pal = PALETTES[paletteIndex % PALETTES.length];
   const A = pal.accents;
   const out = [];
@@ -731,6 +929,133 @@ export function buildRound(scene, engine, paletteIndex, rand) {
   // --- balloon gifts
   put(buildBalloonGift(A[5], A[0], A[2]), J(-0.8), J(-5.2));
   put(buildBalloonGift(A[1], A[4], A[3]), J(7.4), J(-3.6));
+
+  // --- the puppy, forever poking balls around
+  put(buildDog(), J(-4.5), J(-1.5));
+
+  return out;
+}
+
+// あそびのへや: the contraption playground — slide, seesaw, cupboard,
+// trampoline, marble rail, wardrobe finale, and one very smug cat.
+function layoutPlayRoom(scene, engine, paletteIndex, rand) {
+  const pal = PALETTES[paletteIndex % PALETTES.length];
+  const A = pal.accents;
+  const out = [];
+  const J = (v) => v + (rand() - 0.5) * 0.5;
+
+  const put = (built, x, z, opt = {}) => {
+    const p = engine.addProp(built.desc, x, z, opt);
+    built.group.position.set(x, opt.y || 0, z);
+    if (opt.yaw) built.group.rotation.y = opt.yaw;
+    scene.add(built.group);
+    out.push({ prop: p, group: built.group, built });
+    return p;
+  };
+
+  // --- rug starter toys
+  put(buildCrayon(A[0]), J(-1.2), J(1.8), { yaw: 0.6 });
+  put(buildCrayon(A[3]), J(0.8), J(2.4), { yaw: -1.2 });
+  put(buildBall(A[4], 0.24), J(-2.6), J(0.8));
+  put(buildBall(A[1], 0.3), J(2.4), J(0.6));
+  put(buildBall(A[5], 0.26), J(0.2), J(3.6));
+  put(buildDice(), J(-0.6), J(0.6));
+  put(buildDice(), J(1.6), J(1.2));
+  put(buildDuck(pal.duck), J(-3.6), J(2.6));
+  put(buildMiniCar(A[2]), J(3.8), J(2.2), { yaw: 1.4 });
+  put(buildMiniCar(A[0]), J(-4.6), J(0.4), { yaw: -0.4 });
+
+  // --- block tower + book stack
+  {
+    let below = put(buildBlock(A[2], 'A'), -3.2, 4.2);
+    for (let i = 1; i < 4; i++) {
+      below = put(buildBlock(A[(i + 2) % A.length], 'ABCD'[i]), -3.2, 4.2, { y: 0.34 * i, supportId: below.id });
+    }
+    const b1 = put(buildBook(A[1], 0.5), J(4.6), J(-1.8), { yaw: 0.5 });
+    put(buildBook(A[5], 0.44), b1.x, b1.z, { y: 0.09, yaw: 0.1, supportId: b1.id });
+  }
+
+  // --- THE SLIDE: three riders queued on the platform
+  {
+    const sl = buildSlide(A[2], A[0]);
+    const sp = put(sl, -6.8, -2.8, { yaw: 0.5 });
+    const riders = [buildBall(A[0], 0.22), buildDice(), buildBlock(A[4], 'S', 0.3)];
+    riders.forEach((r, i) => {
+      // queue them across the platform (local -x end)
+      const lx = -0.95 - i * 0.02, lz = (i - 1) * 0.24;
+      const c = Math.cos(sp.yaw), s = Math.sin(sp.yaw);
+      const p = put(r, sp.x + c * lx - s * lz, sp.z + s * lx + c * lz, { y: 1.99, supportId: sp.id });
+      p._slideQueue = i;
+    });
+  }
+
+  // --- THE SEESAW: eat the low toy, launch the high one
+  {
+    const ss = buildSeesaw(A[1], A[3]);
+    const sp = put(ss, 4.8, 4.0, { yaw: -0.5 });
+    const c = Math.cos(sp.yaw), s = Math.sin(sp.yaw);
+    // low end (local -x) rests on the floor with a drum on it
+    const low = put(buildDrum(A[3], A[0]), sp.x - c * 1.1, sp.z - s * 1.1);
+    const high = put(buildBall(A[5], 0.26), sp.x + c * 1.1, sp.z + s * 1.1, { y: 1.15, supportId: sp.id });
+    sp.desc.device.lowerId = low.id;
+    sp.desc.device.upperId = high.id;
+    sp.desc.device.launchDir = 1;
+  }
+
+  // --- THE CUPBOARD: sealed treasure until the hole rattles it
+  {
+    const cb = buildCupboard('#c98d5f', A[4]);
+    const cp = put(cb, 8.9, -3.6, { yaw: -Math.PI / 2 });
+    const treats = [
+      buildBall(A[0], 0.18), buildBall(A[2], 0.16), buildCup(A[5]),
+      buildBook(A[3], 0.4), buildTeapot(A[1]), buildDice(),
+    ];
+    treats.forEach((t, i) => {
+      put(t, cp.x, cp.z + (i % 3 - 1) * 0.3, { y: i < 3 ? 0.28 : 0.9, supportId: cp.id });
+    });
+  }
+
+  // --- THE TRAMPOLINE: two balls that never stop bouncing
+  {
+    const tr = buildTrampoline(A[0], A[2]);
+    put(tr, -2.2, 4.6);
+    const b1 = buildBall(A[3], 0.2);
+    const p1 = put(b1, -2.4, 4.5, { y: 1.6, state: 'tossed', vx: 0, vy: 2, vz: 0 });
+    p1.bounces = 0;
+    const b2 = buildBall(A[1], 0.24);
+    const p2 = put(b2, -2.0, 4.8, { y: 2.4, state: 'tossed', vx: 0, vy: 0.5, vz: 0 });
+    p2.bounces = 0;
+  }
+
+  // --- THE MARBLE RAIL along the back wall (feed it with the rocket!)
+  {
+    const rl = buildRail('#8895a5', { x: -4.6, z: -6.3 }, { x: 4.6, z: -6.3 }, 2.7);
+    const p = engine.addProp(rl.desc, rl.pos.x, rl.pos.z);
+    scene.add(rl.group);
+    out.push({ prop: p, group: rl.group, built: rl });
+  }
+
+  // --- furniture & friends
+  {
+    const t = buildTable(A[4]);
+    const tp = put(t, -7.6, 3.6);
+    put(buildCup(A[2]), -7.4, 3.5, { y: t.topY, supportId: tp.id });
+    put(buildTeapot(A[0]), -7.9, 3.8, { y: t.topY, supportId: tp.id });
+  }
+  put(buildChair(A[5]), J(-5.4), J(-4.8), { yaw: 0.7 });
+  put(buildStool(A[3]), J(2.2), J(-4.6));
+  put(buildLamp('#d7c4ac', A[0]), 9.0, 1.8);
+  put(buildXylophone(A), J(6.4), J(1.2), { yaw: 0.9 });
+  put(buildRockingHorse(A[0], A[4]), J(-8.3), J(0.2), { yaw: 1.1 });
+  put(buildWagon(A[2]), J(6.8), J(-5.2), { yaw: -0.9 });
+  put(buildRobot('#9fb4c7', A[1]), J(-6.2), J(5.4), { yaw: 0.4 });
+  put(buildTrain(A[5], A[2]), J(1.2), J(-2.6), { yaw: -0.3 });
+
+  // --- wardrobe finale + balloons + the cat
+  put(buildWardrobe(pal.bed, A[1]), 8.4, 4.6, { yaw: Math.PI });
+  put(buildBalloonGift(A[2], A[0], A[5]), J(-0.6), J(-5.4));
+  put(buildBalloonGift(A[4], A[3], A[1]), J(6.2), J(3.0));
+  put(buildCat(), J(0.5), J(-0.8));
 
   return out;
 }
