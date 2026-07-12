@@ -22,16 +22,27 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 120);
 
-const holeView = new HoleView(scene);
-const room = new Room(scene, holeView);
-const effects = new Effects(scene);
+// the whole room lives inside a rotatable "toy box": worldGroup spins
+// around the box's mid-height axis, boxGroup holds the actual contents
+const BOX_PIVOT_Y = 2.6;
+const worldGroup = new THREE.Group();
+worldGroup.position.y = BOX_PIVOT_Y;
+scene.add(worldGroup);
+const boxGroup = new THREE.Group();
+boxGroup.position.y = -BOX_PIVOT_Y;
+worldGroup.add(boxGroup);
+
+const holeView = new HoleView(boxGroup);
+const room = new Room(scene, holeView, boxGroup);
+const effects = new Effects(boxGroup);
 const audio = new AudioEngine();
 
 // ------------------------------------------------------------ state
 const state = {
   mode: 'title',          // title | select | game | dive | celebrate
-  stage: 0,               // 0: toy room, 1: playroom
-  clears: JSON.parse(localStorage.getItem('anadarake-clears') || '[0,0]'),
+  stage: 0,               // 0 toy, 1 play, 2 guragura, 3 koron, 4 sakasama
+  cine: null,             // running box-turning cinematic
+  clears: JSON.parse(localStorage.getItem('anadarake-clears') || '[0,0,0,0,0]'),
   engine: null,
   entries: [],            // [{prop, group, built}]
   total: 1,
@@ -41,6 +52,7 @@ const state = {
   confettiT: 0,
   diveT: 0,
 };
+while (state.clears.length < 5) state.clears.push(0);
 state.round = 0; // legacy alias (palette index derived per stage)
 Object.defineProperty(state, 'crowns', {
   get() { return (this.clears[0] || 0) + (this.clears[1] || 0); },
@@ -67,7 +79,7 @@ function attachShadow(e) {
   }));
   m.rotation.x = -Math.PI / 2;
   m.renderOrder = 4;
-  scene.add(m);
+  boxGroup.add(m);
   e.shadow = m;
 }
 
@@ -107,30 +119,53 @@ function clearPile() {
 
 function buildLevel() {
   for (const e of state.entries) {
-    scene.remove(e.group);
+    boxGroup.remove(e.group);
     pileGroup.remove(e.group);
-    if (e.shadow) scene.remove(e.shadow);
+    if (e.shadow) boxGroup.remove(e.shadow);
   }
   state.entries = [];
   clearPile();
+  state.cine = null;
+  worldGroup.rotation.z = 0;
 
   const palette = state.clears[state.stage] % 3;
   state.round = palette;
-  room.build(palette);
+  room.build(palette, { boxy: state.stage === 3 });
 
   const eng = new HoleEngine({
     roomW: ROOM_W - 1.2, roomD: ROOM_D - 1.2,
     holeR: 0.42, holeX: 0, holeZ: 2.5,
     seed: 1000 + palette * 77 + state.stage * 13,
+    tiltFloor: state.stage === 2,
   });
   const rand = mulberry32(500 + palette * 31 + state.stage * 7);
-  state.entries = buildRound(scene, eng, palette, rand, state.stage);
+  state.entries = buildRound(boxGroup, eng, palette, rand, state.stage);
   for (const e of state.entries) attachShadow(e);
   state.engine = eng;
   state.total = eng.remaining();
   eng.setHoleTarget(0, 2.5);
   ui.setMeter(0);
   ui.setCrowns(state.crowns);
+  refreshFlipPips();
+}
+
+// light the charge pips on any flip button to match its charge
+function refreshFlipPips() {
+  for (const e of state.entries) {
+    const dev = e.prop.desc.device;
+    if (!dev || dev.type !== 'flip' || !e.group.userData.pips) continue;
+    const accent = e.group.userData.accent || '#ffd166';
+    e.group.userData.pips.forEach((pip, i) => {
+      if (i < dev.charge) {
+        pip.material.color.set(accent);
+        pip.material.emissive.set(accent);
+        pip.material.emissiveIntensity = 0.6;
+      } else {
+        pip.material.color.set('#7d7468');
+        pip.material.emissive.set('#000000');
+      }
+    });
+  }
 }
 
 // ------------------------------------------------------------ UI
@@ -194,6 +229,7 @@ function fitCamera() {
 const camTarget = new THREE.Vector3(0, 0, 2.5);
 const _lookA = new THREE.Vector3();
 const _posA = new THREE.Vector3();
+const _holeWorld = new THREE.Vector3();
 function updateCamera(dt) {
   const h = state.engine ? state.engine.hole : { x: 0, z: 0, r: 0.5 };
   const sx = (Math.random() - 0.5) * state.shake;
@@ -246,9 +282,17 @@ function updateCamera(dt) {
   }
 
   let az, el, wantDist;
-  if (state.mode === 'game') {
-    camTarget.x += (h.x - camTarget.x) * Math.min(1, 4.5 * dt);
-    camTarget.z += (h.z - camTarget.z) * Math.min(1, 4.5 * dt);
+  if (state.mode === 'game' && state.cine) {
+    // box-turning cinematic: pull back and watch the whole box
+    camTarget.x += (0 - camTarget.x) * Math.min(1, 3 * dt);
+    camTarget.z += (0.6 - camTarget.z) * Math.min(1, 3 * dt);
+    az = cam.az; el = cam.el;
+    wantDist = camera.userData.portrait ? 27 : 22;
+  } else if (state.mode === 'game') {
+    _holeWorld.set(h.x, 0, h.z);
+    boxGroup.localToWorld(_holeWorld);
+    camTarget.x += (_holeWorld.x - camTarget.x) * Math.min(1, 4.5 * dt);
+    camTarget.z += (_holeWorld.z - camTarget.z) * Math.min(1, 4.5 * dt);
     az = cam.az; el = cam.el;
     wantDist = (6.6 + h.r * 3.4) * cam.zoom * (camera.userData.portrait ? 1.35 : 1);
   } else {
@@ -277,6 +321,8 @@ fitCamera();
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const floorNormal = new THREE.Vector3();
+const floorPoint = new THREE.Vector3();
 const hitPoint = new THREE.Vector3();
 let pointerDown = false;
 const touches = new Map();
@@ -286,7 +332,13 @@ function pointToFloor(clientX, clientY) {
   ndc.x = (clientX / window.innerWidth) * 2 - 1;
   ndc.y = -(clientY / window.innerHeight) * 2 + 1;
   ray.setFromCamera(ndc, camera);
+  // the floor may be tilted with the box: intersect its actual plane
+  boxGroup.updateMatrixWorld(true);
+  floorNormal.set(0, 1, 0).transformDirection(boxGroup.matrixWorld);
+  floorPoint.set(0, 0, 0).applyMatrix4(boxGroup.matrixWorld);
+  floorPlane.setFromNormalAndCoplanarPoint(floorNormal, floorPoint);
   if (ray.ray.intersectPlane(floorPlane, hitPoint)) {
+    boxGroup.worldToLocal(hitPoint);
     state.engine.setHoleTarget(hitPoint.x, hitPoint.z);
     return true;
   }
@@ -304,7 +356,7 @@ function gestureFrom() {
 
 canvas.addEventListener('pointerdown', (e) => {
   audio.unlock();
-  if (state.mode !== 'game') return;
+  if (state.mode !== 'game' || state.cine) return;
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (touches.size >= 2) {
     pointerDown = false;             // second finger: switch to camera mode
@@ -318,7 +370,7 @@ canvas.addEventListener('pointerdown', (e) => {
   ui.showHint(false);
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (state.mode !== 'game') return;
+  if (state.mode !== 'game' || state.cine) return;
   if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (gesture && touches.size >= 2) {
     const g = gestureFrom();
@@ -374,7 +426,7 @@ function handleEvents(eng) {
         effects.confettiBurst(ev.x, ev.z, 50);
         effects.swallowSparkle(ev.x, ev.z, 0.8, '#ff8fa3');
         state.shake = Math.max(state.shake, 0.2);
-        const minis = spawnPinataContents(scene, eng, state.round, ev.x, ev.z);
+        const minis = spawnPinataContents(boxGroup, eng, state.round, ev.x, ev.z);
         for (const m of minis) attachShadow(m);
         state.entries.push(...minis);
         state.total += minis.length;
@@ -451,6 +503,22 @@ function handleEvents(eng) {
         break;
       }
       case 'burpSpit': audio.popOut(sz); break;
+      case 'tiltCreak': audio.creak(); break;
+      case 'lever':
+        audio.clank();
+        startCine('koron', p);
+        break;
+      case 'flip':
+        audio.ding();
+        refreshFlipPips();
+        startCine('flip', p);
+        break;
+      case 'flipCharge': {
+        refreshFlipPips();
+        if (ev.charge >= ev.need) audio.ding();
+        break;
+      }
+      case 'rainStart': break;
       case 'teeter': audio.teeter(); break;
       case 'settle': audio.boing(sz); break;
       case 'stuckStart':
@@ -530,6 +598,7 @@ function handleEvents(eng) {
           e.group.userData.balloon = null;
           b.position.copy(world);
           scene.add(b);
+          boxGroup.attach(b);      // keep its world pose inside the box
           flyingBalloons.push({ mesh: b, t: 0 });
         }
         break;
@@ -558,8 +627,10 @@ function updateEdgeMarkers() {
   const cands = [];
   for (const e of state.entries) {
     const p = e.prop;
-    if (p.state === S.GONE || p.desc.fixture || p.supportId) continue;
-    markerVec.set(p.x, 0.4, p.z).project(camera);
+    if (p.state === S.GONE || p.desc.fixture || p.supportId || p._raining) continue;
+    markerVec.set(p.x, 0.4, p.z);
+    boxGroup.localToWorld(markerVec);
+    markerVec.project(camera);
     let nx = markerVec.x, ny = markerVec.y;
     const behind = markerVec.z > 1;
     if (behind) { nx = -nx; ny = -ny; }
@@ -582,6 +653,90 @@ function updateEdgeMarkers() {
     });
   }
   ui.updateMarkers(items);
+}
+
+// ------------------------------------------------------------ cinematics
+// コロン (the box tips on its side) & さかさま (the box flips right over)
+function startCine(type, prop) {
+  state.cine = { type, t: 0, prop };
+  state.engine.frozen = true;
+  ui.setLaunchVisible(false);
+  ui.showHint(false);
+}
+
+const LEVER_SPOTS = [[9.3, 3.0, -Math.PI / 2], [0, -6.6, 0], [-9.3, 2.0, Math.PI / 2]];
+function updateCine(dt) {
+  const c = state.cine;
+  if (!c) return;
+  c.t += dt;
+  const eng = state.engine;
+
+  if (c.type === 'koron') {
+    if (c.t < 0.5) {
+      // rumble…
+      state.shake = Math.max(state.shake, 0.12);
+      worldGroup.rotation.z = Math.sin(c.t * 42) * 0.012;
+      if (!c.rumbled) { c.rumbled = true; audio.rumble(); }
+    } else if (c.t < 2.0) {
+      // the box heaves over…
+      const k = (c.t - 0.5) / 1.5;
+      worldGroup.rotation.z = -(k * k) * 0.6;
+      state.shake = Math.max(state.shake, 0.08);
+    } else if (!c.crashed) {
+      // …CRASH: cut to the box resting on its (new) bottom
+      c.crashed = true;
+      worldGroup.rotation.z = 0;
+      audio.crash();
+      state.shake = 0.55;
+      room.build(state.round, { boxy: true });
+      // the lever is bolted to a different wall now
+      const dev = c.prop.desc.device;
+      const spot = LEVER_SPOTS[Math.min(1 - dev.count, LEVER_SPOTS.length - 1)];
+      c.prop.x = spot[0]; c.prop.z = spot[1]; c.prop.yaw = spot[2];
+      const e = state.entries.find((en) => en.prop === c.prop);
+      if (e) { e.group.position.set(c.prop.x, 0, c.prop.z); e.group.rotation.y = c.prop.yaw; }
+      // everything tumbles across to the new floor
+      eng.rainAll({ stagger: 0.05, yMin: 3.0, ySpan: 2.5, scatter: 3.0, vxBias: 0.8 });
+      for (let i = 0; i < 9; i++) {
+        effects.dust((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 10, 1.6);
+      }
+    } else if (c.t > 2.6) {
+      eng.frozen = false;
+      c.prop.desc.device.busy = false;
+      state.cine = null;
+    }
+    return;
+  }
+
+  // flip (さかさま)
+  if (c.t < 0.4) {
+    if (!c.popped) { c.popped = true; audio.squeezePop(0.3); }
+  } else if (c.t < 2.6) {
+    // slowly over…  (toys visibly hang from what is now the top)
+    const k = (c.t - 0.4) / 2.2;
+    const e2 = k * k * (3 - 2 * k);
+    worldGroup.rotation.z = Math.PI * e2;
+    if (!c.wh) { c.wh = true; audio.flipWhoosh(); }
+  } else if (c.t < 3.8) {
+    worldGroup.rotation.z = Math.PI;
+    if (!c.held) { c.held = true; audio.boing(0.5); state.shake = 0.2; }
+  } else if (c.t < 5.8) {
+    // …and back — the toys stay up there, then rain down
+    if (!c.rained) {
+      c.rained = true;
+      eng.rainAll({ stagger: 0.16, yMin: 5.5, ySpan: 3, scatter: 1.5 });
+      audio.flipWhoosh();
+    }
+    const k = (c.t - 3.8) / 2;
+    const e2 = k * k * (3 - 2 * k);
+    worldGroup.rotation.z = Math.PI * (1 - e2);
+  } else {
+    worldGroup.rotation.z = 0;
+    eng.frozen = false;
+    c.prop.desc.device.busy = false;
+    refreshFlipPips();
+    state.cine = null;
+  }
 }
 
 // small visual tweens (cupboard doors, seesaw plank, trampoline squash)
@@ -644,7 +799,7 @@ function updateBalloons(dt) {
     b.mesh.position.x += Math.sin(b.t * 2.4) * 0.4 * dt;
     b.mesh.rotation.z = Math.sin(b.t * 3) * 0.15;
     if (b.t > 4) {
-      scene.remove(b.mesh);
+      if (b.mesh.parent) b.mesh.parent.remove(b.mesh);
       flyingBalloons.splice(i, 1);
     }
   }
@@ -676,6 +831,12 @@ function syncMeshes(dt) {
       if (e.shadow) e.shadow.visible = false;
       continue;
     }
+    if (p._raining) {              // waiting up in the sky for its turn
+      if (g.visible) g.visible = false;
+      if (e.shadow) e.shadow.visible = false;
+      continue;
+    }
+    if (!g.visible) g.visible = true;
     g.position.set(p.x, p.y - p.sink, p.z);
 
     // contact blob: shrinks and fades as the toy leaves the ground
@@ -736,9 +897,12 @@ function tick() {
 
   if (state.mode === 'game' || state.mode === 'dive' || state.mode === 'celebrate') {
     const eng = state.engine;
+    updateCine(dt);
     eng.update(dt);
     handleEvents(eng);
     syncMeshes(dt);
+    // the seesaw floor leans with the weight still on it
+    if (!state.cine) worldGroup.rotation.z = -eng.tilt;
 
     if (state.mode === 'game') {
       const remaining = eng.remaining();

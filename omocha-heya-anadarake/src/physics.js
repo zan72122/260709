@@ -167,6 +167,13 @@ export class HoleEngine {
     this.waterTimer = 0;
     this.floatQueue = 0;
     this.burps = [];               // pending burps after big meals
+    // ぐらぐら: the whole floor is a seesaw, tilting along x with the
+    // weight of whatever still stands on it (round things roll downhill)
+    this.tiltFloor = !!opt.tiltFloor;
+    this.tilt = 0;                 // radians; >0 means +x side is DOWNHILL
+    this.tiltVel = 0;
+    this.maxTilt = opt.maxTilt || 0.14;   // ≈8°
+    this.frozen = false;           // cinematic in progress: physics holds
   }
 
   addProp(desc, x, z, opt = {}) {
@@ -250,6 +257,14 @@ export class HoleEngine {
     if (p.desc.pinata) this.emit('pinata', p, { x: this.hole.x, z: this.hole.z });
     if (!p.desc.waterSource && !p.desc.walker && this.belly.length < 3) this.belly.push(p);
     if (p.footR > 0.55) this.burps.push({ t: 1.1 + this.rand() * 0.5 });
+    // each meal charges the flip button a little
+    for (const q of this.props) {
+      const dv = q.desc.device;
+      if (dv && dv.type === 'flip' && dv.charge < dv.need) {
+        dv.charge++;
+        this.emit('flipCharge', q, { charge: dv.charge, need: dv.need });
+      }
+    }
   }
 
   // spawn a burst of mini props (piñata contents). descs: [{desc, ...}]
@@ -299,7 +314,30 @@ export class HoleEngine {
   // ------------------------------------------------------------ update
   update(dt) {
     dt = Math.min(dt, 1 / 30);
+    if (this.frozen) return;       // a box-turning cinematic is playing
     const h = this.hole;
+
+    // seesaw floor: torque from everything standing on it
+    if (this.tiltFloor) {
+      let torque = 0;
+      for (const p of this.props) {
+        if (p.desc.fixture || p.supportId) continue;
+        if (p.state === S.REST || p.state === S.TEETER || p.state === S.WANDER ||
+            p.state === S.BRIDGE || p.state === S.WHEEL || p.state === S.STUCK) {
+          torque += p.desc.mass * p.x;
+        }
+      }
+      const target = Math.max(-this.maxTilt, Math.min(this.maxTilt, torque * 0.012));
+      const k = 2.2, damp = 2.6;
+      this.tiltVel += (target - this.tilt) * k * dt;
+      this.tiltVel *= Math.exp(-damp * dt);
+      const before = this.tilt;
+      this.tilt += this.tiltVel * dt;
+      if (Math.abs(this.tiltVel) > 0.05 && Math.abs(this.tilt - before) > 0.0005) {
+        this._creakT = (this._creakT || 0) - dt;
+        if (this._creakT <= 0) { this._creakT = 1.1; this.emit('tiltCreak'); }
+      }
+    }
 
     {
       const k = 10, dampK = 6.2;
@@ -492,11 +530,13 @@ export class HoleEngine {
           return;
         }
         if (p.desc.fixture) { this._updateFixture(p, dt); return; }
+        if (this.tiltFloor) this._tiltRoll(p, dt);
         this._evaluateFloor(p, dt);
         return;
       }
 
       case S.TEETER: {
+        if (this.tiltFloor) this._tiltRoll(p, dt);
         this._evaluateFloor(p, dt);
         return;
       }
@@ -739,7 +779,9 @@ export class HoleEngine {
       }
 
       case S.TOSSED: {
-        if (p.t < 0) return;          // staggered tower cascade
+        if (p.t < 0) return;          // staggered tower cascade / toy rain
+        if (p._raining) p._raining = false;
+        if (this.tiltFloor && p.y < 1) p.vx += G * Math.sin(this.tilt) * 0.5 * dt;
         p.vy -= G * dt;
         p.x += p.vx * dt; p.z += p.vz * dt; p.y += p.vy * dt;
         p.spinAngle += p.spin * dt;
@@ -810,6 +852,64 @@ export class HoleEngine {
     return false;
   }
 
+  // ぐらぐら床: downhill rolling. round things roll readily; boxes cling on
+  // until the slope beats their friction, then only reluctantly slide.
+  _tiltRoll(p, dt) {
+    const slope = this.tilt;
+    const a = G * Math.sin(slope);
+    if (p.desc.round) {
+      p.vx += a * 0.65 * dt;
+      p.vx *= Math.exp(-0.4 * dt);
+    } else if (Math.abs(slope) > 0.105) {   // ≈6°: static friction gives way
+      p.vx += a * 0.25 * dt;
+      p.vx *= Math.exp(-1.8 * dt);
+    } else {
+      p.vx *= Math.exp(-6 * dt);
+    }
+    if (Math.abs(p.vx) < 0.005) return;
+    p.x += p.vx * dt;
+    const mw = this.roomW / 2 - 0.5;
+    if (p.x > mw || p.x < -mw) {
+      p.x = Math.max(-mw, Math.min(mw, p.x));
+      if (Math.abs(p.vx) > 0.6) this.emit('thud', p, { strength: Math.min(0.5, Math.abs(p.vx) * 0.2) });
+      p.vx *= -0.3;
+    }
+    if (p.desc.round) {
+      p.spinAxis = [0, 0, 1];
+      p.spinAngle -= (p.vx * dt) / Math.max(0.08, p.footR);
+    }
+  }
+
+  // さかさま/コロン: everything airborne, then a staggered toy rain.
+  // while p.t < 0 the prop waits invisibly in the sky (main hides _raining).
+  rainAll(opt = {}) {
+    const stagger = opt.stagger ?? 0.2;
+    const yMin = opt.yMin ?? 5.5, ySpan = opt.ySpan ?? 3;
+    const mw = this.roomW / 2 - 1.2, md = this.roomD / 2 - 1.2;
+    let i = 0;
+    for (const p of this.props) {
+      if (p.state === S.GONE || p.desc.fixture || p.desc.balloon || p.state === S.FLOATING) continue;
+      if (this.projectile === p) this.projectile = null;
+      if (this.hole.pluggedBy === p.id) this.hole.pluggedBy = 0;
+      p.supportId = null;
+      p.state = S.TOSSED; p.t = -(i * stagger); p.bounces = 0;
+      p._raining = true;
+      if (opt.scatter) {
+        p.x = Math.max(-mw, Math.min(mw, p.x + (this.rand() * 2 - 1) * opt.scatter));
+        p.z = Math.max(-md, Math.min(md, p.z + (this.rand() * 2 - 1) * opt.scatter));
+      }
+      p.y = yMin + this.rand() * ySpan;
+      p.vx = (this.rand() - 0.5) * 1.2 + (opt.vxBias || 0);
+      p.vz = (this.rand() - 0.5) * 1.2 + (opt.vzBias || 0);
+      p.vy = 0;
+      p.sink = 0; p.tiltX = 0; p.tiltZ = 0; p.caughtWheel = -1;
+      p.spin = 3 + this.rand() * 4; p.spinAxis = this._randAxis();
+      i++;
+    }
+    this.emit('rainStart', null, { count: i });
+    return i;
+  }
+
   // items on a shaken support creep toward the edge and drop off
   _rideSupport(p, sup, dt) {
     p.tiltX *= Math.exp(-8 * dt); p.tiltZ *= Math.exp(-8 * dt);
@@ -869,8 +969,20 @@ export class HoleEngine {
       p._rattleT -= dt;
       if (p._rattleT <= 0) { p._rattleT = 0.3; this.emit('shakeRattle', p); }
       p.wobble = Math.max(p.wobble, 0.4);
-      // the cupboard bursts open and dumps its treasure once
+      // コロン: the big handle lever tips the whole toy box on its side
       const dev = p.desc.device;
+      if (dev && dev.type === 'lever' && !dev.busy && dev.count > 0) {
+        dev.busy = true;
+        dev.count--;
+        this.emit('lever', p);
+      }
+      // さかさま: the fully-charged swirl button flips the box right over
+      if (dev && dev.type === 'flip' && !dev.busy && dev.charge >= dev.need) {
+        dev.busy = true;
+        dev.charge = 0;
+        this.emit('flip', p);
+      }
+      // the cupboard bursts open and dumps its treasure once
       if (dev && dev.type === 'cupboard' && !dev.open) {
         dev.open = true;
         this.emit('cupboardOpen', p);

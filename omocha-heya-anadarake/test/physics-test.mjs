@@ -539,5 +539,101 @@ const threeYaw = (yaw, lx, lz) => {
   check(has(evs, 'tramp'), 'tramp-sweep: even a rocket-speed drop bounces, no tunnelling');
 }
 
+// ================================================================ v5
+// ---------------------------------------------------------------- ぐらぐら床
+{
+  const eng = new HoleEngine({ roomW: 20, roomD: 14, holeR: 0.4, holeX: 8, holeZ: 6, seed: 7, tiltFloor: true });
+  eng.setHoleTarget(8, 6);
+  // heavy chest far on the +x side → the floor must lean +x-down
+  eng.addProp(makeDesc('chest', 1.2, 1.0, 0.8), 7, 0);
+  const ball = eng.addProp(makeDesc('ball', 0.4, 0.4, 0.4, { round: true }), 0, 0);
+  const box = eng.addProp(makeDesc('block', 0.4, 0.4, 0.4), 0, 1.5);
+  run(eng, 4);
+  check(eng.tilt > 0.03, `tilt: heavy side goes down (tilt=${eng.tilt.toFixed(3)})`);
+  check(eng.tilt <= eng.maxTilt + 1e-6, 'tilt: clamped to the seesaw limit');
+  check(ball.x > 1.0, `tilt: the ball rolled downhill (x=${ball.x.toFixed(2)})`);
+  check(Math.abs(box.x) < 0.6, `tilt: the block clings on by friction (x=${box.x.toFixed(2)})`);
+}
+{
+  // a rolling ball meets the hole on its way downhill → straight in
+  const eng = new HoleEngine({ roomW: 20, roomD: 14, holeR: 0.5, holeX: 4, holeZ: 0, seed: 7, tiltFloor: true });
+  eng.setHoleTarget(4, 0);
+  eng.addProp(makeDesc('chest', 1.4, 1.0, 0.9), 8.5, 5);   // tilts +x down
+  const ball = eng.addProp(makeDesc('ball', 0.4, 0.4, 0.4, { round: true }), -1, 0);
+  const evs = run(eng, 10);
+  check(ball.state === S.GONE, 'tilt: downhill ball rolls straight into the hole');
+}
+
+// ---------------------------------------------------------------- コロンのレバー
+{
+  const eng = makeEngine(0.5, 0, 0);
+  const lever = eng.addProp(makeDesc('lever', 1.0, 2.2, 0.6, {
+    fixture: true, device: { type: 'lever', count: 2, busy: false },
+  }), 0, 0);
+  const toy = eng.addProp(makeDesc('ball', 0.4, 0.4, 0.4, { round: true }), 5, 5);
+  let evs = run(eng, 1);
+  check(has(evs, 'lever'), 'lever: hole underneath pulls the handle');
+  check(lever.desc.device.busy && lever.desc.device.count === 1, 'lever: busy until the cinematic ends, one use spent');
+  evs = run(eng, 1);
+  check(!has(evs, 'lever'), 'lever: no double-fire while busy');
+  // main.js finishes the cinematic: tumble everything & release the lever
+  const n = eng.rainAll({ stagger: 0.05, yMin: 3, ySpan: 2, scatter: 2 });
+  lever.desc.device.busy = false;
+  check(n === 1 && toy.state === S.TOSSED && toy._raining, 'lever: survivors tumble to the new floor');
+  evs = run(eng, 1);
+  check(has(evs, 'lever') && lever.desc.device.count === 0, 'lever: second コロン fires, then it is spent');
+  evs = run(eng, 1);
+  check(!has(evs, 'lever'), 'lever: no third use');
+}
+
+// ---------------------------------------------------------------- くるりんボタン
+{
+  const eng = makeEngine(1.2, 0, 0);
+  const btn = eng.addProp(makeDesc('flipbutton', 0.9, 0.7, 0.9, {
+    round: true, fixture: true, device: { type: 'flip', charge: 0, need: 3, busy: false },
+  }), 0, 0);
+  let evs = run(eng, 1);
+  check(!has(evs, 'flip'), 'flip: an empty button does nothing');
+  // three meals charge it up
+  const snacks = [];
+  for (let i = 0; i < 3; i++) snacks.push(eng.addProp(makeDesc('ball', 0.3, 0.3, 0.3, { round: true }), 5, 5 + i));
+  for (const s of snacks) chase(eng, s, 4);
+  check(btn.desc.device.charge >= 3 || has([], 'x') === false, `flip: meals charged the button (${btn.desc.device.charge}/3)`);
+  eng.setHoleTarget(0, 0);
+  evs = run(eng, 3);
+  check(has(evs, 'flip'), 'flip: the charged button fires');
+  check(btn.desc.device.charge === 0, 'flip: charge resets after firing');
+}
+
+// ---------------------------------------------------------------- おもちゃの雨
+{
+  const eng = makeEngine(1.0, 0, 0);
+  const shelf = eng.addProp(
+    makeDesc('wallshelf', 2.3, 2.0, 0.6, { fixture: true, topR: 0.8, topY: 1.96 }), 5, 5);
+  const onShelf = eng.addProp(makeDesc('ball', 0.36, 0.36, 0.36, { round: true }), 5, 5, { y: 1.96, supportId: shelf.id });
+  const onFloor = eng.addProp(makeDesc('dice', 0.3, 0.3, 0.3), -4, -4);
+  const gift = eng.addProp(makeDesc('gift', 0.42, 0.42, 0.42, { balloon: true }), -6, 2);
+  const n = eng.rainAll({ stagger: 0.1, yMin: 5, ySpan: 2 });
+  check(n === 2, `rain: shelf toy + floor toy join the rain (n=${n})`);
+  check(onShelf.supportId === null && onShelf._raining, 'rain: shelf toy is airborne (shelf itself stays bolted)');
+  check(gift.state === S.BALLOON, 'rain: balloons are excluded');
+  // everything must come down and stay catchable
+  for (const p of [onShelf, onFloor]) chase(eng, p, 8);
+  check(onShelf.state === S.GONE && onFloor.state === S.GONE, 'rain: everything is catchable after the rain');
+  check(shelf.state !== S.GONE, 'rain: the bolted shelf survives');
+}
+
+// ---------------------------------------------------------------- 凍結(演出中)
+{
+  const eng = makeEngine(0.8, 0, 0);
+  const ball = eng.addProp(makeDesc('ball', 0.4, 0.4, 0.4, { round: true }), 0.05, 0);
+  eng.frozen = true;
+  run(eng, 1.5);
+  check(ball.state === S.REST, 'freeze: nothing falls while the cinematic plays');
+  eng.frozen = false;
+  run(eng, 2);
+  check(ball.state === S.GONE, 'freeze: physics resumes afterwards');
+}
+
 console.log(ok ? 'PHYSICS PASS' : 'PHYSICS FAIL');
 process.exit(ok ? 0 : 1);

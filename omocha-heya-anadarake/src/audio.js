@@ -186,6 +186,48 @@ export class AudioEngine {
     this._tone(1900, t, 0.03, 'square', 0.025, 1400);
   }
 
+  // v5: the box itself moves
+  rumble() {
+    if (!this._ok()) return;
+    const t = this._now();
+    this._noise(t, 1.6, { type: 'lowpass', freq: 160, vol: 0.35 });
+    this._tone(46, t, 1.5, 'sawtooth', 0.12, 38);
+  }
+
+  crash() {
+    if (!this._ok()) return;
+    const t = this._now();
+    this._noise(t, 0.5, { freq: 500, bendTo: 150, q: 0.7, vol: 0.35 });
+    this._tone(70, t, 0.5, 'sine', 0.3, 36);
+    for (let i = 0; i < 6; i++) {
+      const tt = t + 0.08 + i * 0.09;
+      this._tone(160 + Math.random() * 220, tt, 0.12, 'triangle', 0.1, 90);
+      this._noise(tt, 0.06, { freq: 900 + Math.random() * 800, q: 2, vol: 0.06 });
+    }
+  }
+
+  flipWhoosh() {
+    if (!this._ok()) return;
+    const t = this._now();
+    this._noise(t, 1.8, { freq: 300, bendTo: 1400, q: 0.5, vol: 0.14 });
+    this._tone(120, t, 1.6, 'sine', 0.08, 240);
+  }
+
+  ding() {
+    if (!this._ok('ding', 0.3)) return;
+    const t = this._now();
+    this._tone(1318, t, 0.5, 'sine', 0.14);
+    this._tone(1976, t + 0.09, 0.4, 'sine', 0.08);
+  }
+
+  clank() {
+    if (!this._ok()) return;
+    const t = this._now();
+    this._tone(220, t, 0.14, 'square', 0.14, 130);
+    this._noise(t, 0.08, { freq: 1500, q: 2.5, vol: 0.12 });
+    this._tone(110, t + 0.1, 0.2, 'triangle', 0.12, 80);
+  }
+
   pant() {
     if (!this._ok('pant', 0.4)) return;
     const t = this._now();

@@ -34,6 +34,9 @@ export class UI {
     const stages = [
       { emoji: '🧸', name: 'おもちゃのへや' },
       { emoji: '🛝', name: 'あそびのへや' },
+      { emoji: '⚖️', name: 'ぐらぐらのへや' },
+      { emoji: '📦', name: 'コロンのへや' },
+      { emoji: '🙃', name: 'さかさまのへや' },
     ];
     stages.forEach((s, i) => {
       const card = this._el('button', 'stage-card', '', grid);
@@ -107,7 +110,7 @@ export class UI {
     this.celebrate.classList.add('hidden');
   }
 
-  showSelect(stageClears = [0, 0]) {
+  showSelect(stageClears = [0, 0, 0, 0, 0]) {
     this.title.classList.add('hidden');
     this.select.classList.remove('hidden');
     this.hud.classList.add('hidden');

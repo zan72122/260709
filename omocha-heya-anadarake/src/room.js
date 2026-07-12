@@ -132,9 +132,45 @@ function artTexture(emoji, bg) {
   });
 }
 
+// cardboard-box look for コロンのへや
+function cardboardTex(w, h, pal, opts = {}) {
+  return tex(w, h, (ctx) => {
+    ctx.fillStyle = '#cfa46b';
+    ctx.fillRect(0, 0, w, h);
+    // corrugation
+    ctx.strokeStyle = 'rgba(120,80,35,0.16)';
+    ctx.lineWidth = 3;
+    for (let x = 0; x < w; x += 14) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    }
+    // packing tape stripe
+    ctx.fillStyle = 'rgba(230,220,185,0.85)';
+    if (opts.tapeAcross) ctx.fillRect(0, h * 0.42, w, h * 0.16);
+    else ctx.fillRect(w * 0.44, 0, w * 0.12, h);
+    // crayon doodles
+    ctx.strokeStyle = 'rgba(255,120,80,0.55)';
+    ctx.lineWidth = 6; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(w * 0.16, h * 0.3, 22, 0, 5.6); ctx.stroke();
+    ctx.strokeStyle = 'rgba(90,150,255,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.74, h * 0.72); ctx.lineTo(w * 0.79, h * 0.6);
+    ctx.lineTo(w * 0.84, h * 0.72); ctx.lineTo(w * 0.89, h * 0.6); ctx.stroke();
+    if (opts.label) {
+      // toy-box label sticker
+      ctx.fillStyle = '#fffdf5';
+      ctx.fillRect(w * 0.36, h * 0.66, w * 0.28, h * 0.2);
+      ctx.fillStyle = '#ff8b3d';
+      ctx.font = `800 ${h * 0.11}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('🧸 TOYS', w * 0.5, h * 0.76);
+    }
+  });
+}
+
 export class Room {
-  constructor(scene, holeView) {
+  constructor(scene, holeView, container = null) {
     this.scene = scene;
+    this.container = container || scene;   // the rotatable box group
     this.holeView = holeView;
     this.group = null;
 
@@ -153,14 +189,15 @@ export class Room {
     scene.add(this.sun.target);
   }
 
-  build(paletteIndex) {
+  build(paletteIndex, opts = {}) {
     const pal = PALETTES[paletteIndex % PALETTES.length];
     if (this.group) {
-      this.scene.remove(this.group);
+      this.container.remove(this.group);
       this.group.traverse((o) => { if (o.material && o.material.map) o.material.map.dispose(); });
     }
     const g = new THREE.Group();
     this.group = g;
+    const boxy = !!opts.boxy;
 
     this.scene.background = new THREE.Color(pal.wallLow);
     this.scene.fog = new THREE.Fog(pal.wallLow, 30, 60);
@@ -169,7 +206,9 @@ export class Room {
     this.sun.color.set(pal.name === 'yozora' ? '#cdd7ff' : pal.name === 'yuuyake' ? '#ffd9a8' : '#fff2d8');
 
     // floor — the hole discard shader is patched into this material
-    const floorMat = new THREE.MeshLambertMaterial({ map: floorTexture(pal) });
+    const floorMat = new THREE.MeshLambertMaterial({
+      map: boxy ? cardboardTex(1024, 700, pal, { label: true, tapeAcross: true }) : floorTexture(pal),
+    });
     this.holeView.patchFloorMaterial(floorMat);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
     floor.rotation.x = -Math.PI / 2;
@@ -186,13 +225,15 @@ export class Room {
     g.add(apron);
 
     // walls: back + left + right (front stays open for the camera)
-    const wallMatBack = new THREE.MeshLambertMaterial({ map: wallTexture(pal, { stars: pal.name === 'yozora' }) });
+    const wallMatBack = new THREE.MeshLambertMaterial({
+      map: boxy ? cardboardTex(1024, 256, pal) : wallTexture(pal, { stars: pal.name === 'yozora' }),
+    });
     const back = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W + 0.4, WALL_H), wallMatBack);
     back.position.set(0, WALL_H / 2, -ROOM_D / 2 - 0.05);
     back.receiveShadow = true;
     g.add(back);
 
-    const sideTex = wallTexture(pal, { stars: pal.name === 'yozora' });
+    const sideTex = boxy ? cardboardTex(1024, 256, pal) : wallTexture(pal, { stars: pal.name === 'yozora' });
     for (const s of [-1, 1]) {
       const side = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D + 0.4, WALL_H), new THREE.MeshLambertMaterial({ map: sideTex }));
       side.position.set(s * (ROOM_W / 2 + 0.05), WALL_H / 2, 0);
@@ -206,32 +247,38 @@ export class Room {
     // player orbits around — free dollhouse cutaway.
     const front = new THREE.Mesh(
       new THREE.PlaneGeometry(ROOM_W + 0.4, WALL_H),
-      new THREE.MeshLambertMaterial({ map: wallTexture(pal, { stars: pal.name === 'yozora' }) })
+      new THREE.MeshLambertMaterial({
+        map: boxy ? cardboardTex(1024, 256, pal) : wallTexture(pal, { stars: pal.name === 'yozora' }),
+      })
     );
     front.position.set(0, WALL_H / 2, ROOM_D / 2 + 0.05);
     front.rotation.y = Math.PI;
     front.receiveShadow = true;
     g.add(front);
     // a picture on the front wall so the far side isn't bare when orbited to
-    const frontArt = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.3, 1.3),
-      new THREE.MeshBasicMaterial({ map: artTexture(pal.name === 'yozora' ? '🌟' : '🧸', pal.accents[3]) })
-    );
-    frontArt.position.set(-2.5, 3.0, ROOM_D / 2 + 0.03);
-    frontArt.rotation.y = Math.PI;
-    frontArt.rotation.z = 0.03;
-    g.add(frontArt);
+    if (!boxy) {
+      const frontArt = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.3, 1.3),
+        new THREE.MeshBasicMaterial({ map: artTexture(pal.name === 'yozora' ? '🌟' : '🧸', pal.accents[3]) })
+      );
+      frontArt.position.set(-2.5, 3.0, ROOM_D / 2 + 0.03);
+      frontArt.rotation.y = Math.PI;
+      frontArt.rotation.z = 0.03;
+      g.add(frontArt);
+    }
 
-    // window on the back wall
-    const win = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.0, 3.4),
-      new THREE.MeshBasicMaterial({ map: windowTexture(pal) })
-    );
-    win.position.set(-4.5, 2.9, -ROOM_D / 2 + 0.02);
-    g.add(win);
+    // window on the back wall (a cardboard box has none)
+    if (!boxy) {
+      const win = new THREE.Mesh(
+        new THREE.PlaneGeometry(3.0, 3.4),
+        new THREE.MeshBasicMaterial({ map: windowTexture(pal) })
+      );
+      win.position.set(-4.5, 2.9, -ROOM_D / 2 + 0.02);
+      g.add(win);
+    }
 
     // wall art
-    const arts = pal.name === 'yozora' ? ['🌙', '⭐'] : ['🚂', '🦆'];
+    const arts = boxy ? [] : pal.name === 'yozora' ? ['🌙', '⭐'] : ['🚂', '🦆'];
     arts.forEach((e, i) => {
       const art = new THREE.Mesh(
         new THREE.PlaneGeometry(1.3, 1.3),
@@ -242,22 +289,24 @@ export class Room {
       g.add(art);
     });
 
-    // door on the right wall
-    const door = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.8, 3.6),
-      new THREE.MeshLambertMaterial({ color: '#f7f0e3' })
-    );
-    door.position.set(ROOM_W / 2 - 0.02, 1.8, 2.5);
-    door.rotation.y = -Math.PI / 2;
-    g.add(door);
-    const knob = new THREE.Mesh(
-      new THREE.SphereGeometry(0.08, 8, 6),
-      new THREE.MeshLambertMaterial({ color: '#e0b34c' })
-    );
-    knob.position.set(ROOM_W / 2 - 0.1, 1.8, 1.9);
-    g.add(knob);
+    // door on the right wall (not on a cardboard box)
+    if (!boxy) {
+      const door = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.8, 3.6),
+        new THREE.MeshLambertMaterial({ color: '#f7f0e3' })
+      );
+      door.position.set(ROOM_W / 2 - 0.02, 1.8, 2.5);
+      door.rotation.y = -Math.PI / 2;
+      g.add(door);
+      const knob = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08, 8, 6),
+        new THREE.MeshLambertMaterial({ color: '#e0b34c' })
+      );
+      knob.position.set(ROOM_W / 2 - 0.1, 1.8, 1.9);
+      g.add(knob);
+    }
 
-    this.scene.add(g);
+    this.container.add(g);
     return pal;
   }
 }

@@ -63,13 +63,17 @@ const seen = new Set();
 
 function playStage(stage, seed) {
   const scene = new THREE.Group();
-  const eng = new HoleEngine({ roomW: 20.8, roomD: 13.8, holeR: 0.42, holeX: 0, holeZ: 2.5, seed });
+  const eng = new HoleEngine({
+    roomW: 20.8, roomD: 13.8, holeR: 0.42, holeX: 0, holeZ: 2.5, seed,
+    tiltFloor: stage === 2,
+  });
   buildRound(scene, eng, 0, mulberry32(500 + stage * 7), stage);
   const total = eng.remaining();
   const dt = 1 / 60;
   let steps = 0;
   const MAX_STEPS = 60 * 900;
   let launches = 0;
+  let maxTilt = 0;
 
   while (eng.remaining() > 0 && steps < MAX_STEPS) {
     const r = eng.hole.r;
@@ -115,8 +119,14 @@ function playStage(stage, seed) {
     }
 
     eng.update(dt);
+    maxTilt = Math.max(maxTilt, Math.abs(eng.tilt));
     for (const ev of eng.events) {
       seen.add(ev.type);
+      // stand in for main.js: finish the box-turning cinematics instantly
+      if (ev.type === 'lever' || ev.type === 'flip') {
+        eng.rainAll({ stagger: 0.06, yMin: 3.5, ySpan: 2.5, scatter: 2 });
+        ev.p.desc.device.busy = false;
+      }
       if (ev.type === 'pinata') {
         const minis = [];
         for (let i = 0; i < 9; i++) {
@@ -140,14 +150,20 @@ function playStage(stage, seed) {
   check(steps < MAX_STEPS, `stage ${stage}: finished before the timeout`);
   check(eng.props.filter((p) => p.desc.fixture).every((p) => p.state !== S.GONE),
     `stage ${stage}: fixtures stayed bolted down`);
-  return eng;
+  return { eng, maxTilt };
 }
 
-const eng0 = playStage(0, 1000);
+const { eng: eng0 } = playStage(0, 1000);
 check(eng0.props.some((p) => p.desc.walker && p.desc.walker.kind === 'dog'), 'stage 0: has the puppy');
-const eng1 = playStage(1, 1013);
+const { eng: eng1 } = playStage(1, 1013);
 check(eng1.props.some((p) => p.desc.walker && p.desc.walker.kind === 'cat'), 'stage 1: has the cat');
 check(eng1.props.some((p) => p.desc.device && p.desc.device.type === 'slide'), 'stage 1: has the slide');
+const { maxTilt: tilt2 } = playStage(2, 1027);
+check(tilt2 > 0.02, `stage 2: the seesaw floor actually tilted (max ${tilt2.toFixed(3)})`);
+const { eng: eng3 } = playStage(3, 1031);
+check(eng3.props.some((p) => p.desc.device && p.desc.device.type === 'lever'), 'stage 3: has the コロン lever');
+const { eng: eng4 } = playStage(4, 1049);
+check(eng4.props.some((p) => p.desc.device && p.desc.device.type === 'flip'), 'stage 4: has the flip button');
 
 // (catapult is covered deterministically in physics-test.mjs — in a free
 // play-through the bot may shake the ball off the seesaw before flipping it)
