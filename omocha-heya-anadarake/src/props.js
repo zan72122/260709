@@ -745,6 +745,86 @@ export function buildWardrobe(color, accent) {
   };
 }
 
+// --------------------------------------------------- v5: box controls
+// コロン: a big wall handle — park the hole under it to tip the whole box
+export function buildLever(color, accent) {
+  const g = new THREE.Group();
+  add(g, G('box', 0.9, 1.1, 0.18), mat('#e8dcc8'), 0, 1.5, 0);
+  for (const s of [-1, 1]) add(g, G('sph', 0.05, 6, 5), mat('#8895a5'), s * 0.34, 1.5, 0.09);
+  const arm = new THREE.Group();
+  add(arm, G('cyl', 0.07, 0.07, 1.0, 10), mat(color), 0, -0.5, 0);
+  add(arm, G('sph', 0.2, 12, 10), mat(accent), 0, -1.0, 0);
+  arm.position.set(0, 2.0, 0.16);
+  arm.rotation.z = 0.35;
+  g.add(arm);
+  g.userData.arm = arm;
+  // big curved arrow sticker so it reads as "this turns the box"
+  const tex = canvasTex(96, 96, (ctx, w, h) => {
+    ctx.strokeStyle = '#ff8b3d'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(w / 2, h / 2, w * 0.3, -0.5, 3.2); ctx.stroke();
+    ctx.fillStyle = '#ff8b3d';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.78, h * 0.28); ctx.lineTo(w * 0.95, h * 0.42); ctx.lineTo(w * 0.7, h * 0.5);
+    ctx.closePath(); ctx.fill();
+  });
+  const st = new THREE.Mesh(G('box', 0.5, 0.5, 0.02), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+  st.position.set(0, 1.5, 0.12);
+  g.add(st);
+  return {
+    group: g,
+    desc: makeDesc('lever', 1.0, 2.2, 0.6, {
+      fixture: true, name: 'lever',
+      device: { type: 'lever', count: 2, busy: false },
+    }),
+  };
+}
+
+// さかさま: the swirl button — charges as you eat, then flips the box over
+export function buildFlipButton(color, accent) {
+  const g = new THREE.Group();
+  add(g, G('cyl', 0.34, 0.42, 0.5, 12), mat('#e8dcc8'), 0, 0.25, 0);
+  const tex = canvasTex(128, 128, (ctx, w, h) => {
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(w / 2, h / 2, w * 0.46, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 12; ctx.lineCap = 'round';
+    for (const o of [0, Math.PI]) {
+      ctx.beginPath(); ctx.arc(w / 2, h / 2, w * 0.26, o + 0.4, o + 2.6); ctx.stroke();
+      const a = o + 2.6;
+      const px = w / 2 + Math.cos(a) * w * 0.26, py = h / 2 + Math.sin(a) * w * 0.26;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(px + Math.cos(a + 1.2) * 14, py + Math.sin(a + 1.2) * 14);
+      ctx.lineTo(px + Math.cos(a - 0.3) * 16, py + Math.sin(a - 0.3) * 16);
+      ctx.lineTo(px + Math.cos(a + 2.6) * 14, py + Math.sin(a + 2.6) * 14);
+      ctx.closePath(); ctx.fill();
+    }
+  });
+  const face = new THREE.Mesh(G('cyl', 0.32, 0.32, 0.12, 20),
+    new THREE.MeshLambertMaterial({ map: tex }));
+  face.position.y = 0.56;
+  face.castShadow = true;
+  g.add(face);
+  g.userData.buttonFace = face;
+  // charge pips around the pedestal: light up one per meal
+  const pips = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const pip = new THREE.Mesh(G('sph', 0.055, 8, 6),
+      new THREE.MeshLambertMaterial({ color: '#7d7468', emissive: '#000000' }));
+    pip.position.set(Math.cos(a) * 0.44, 0.3, Math.sin(a) * 0.44);
+    g.add(pip);
+    pips.push(pip);
+  }
+  g.userData.pips = pips;
+  g.userData.accent = accent;
+  return {
+    group: g,
+    desc: makeDesc('flipbutton', 0.9, 0.7, 0.9, {
+      round: true, fixture: true, name: 'flip button',
+      device: { type: 'flip', charge: 6, need: 6, busy: false },
+    }),
+  };
+}
+
 // --------------------------------------------------- v4: dog & cat
 export function buildDog(color = '#e8d3b0') {
   const g = new THREE.Group();
@@ -798,9 +878,252 @@ export function buildCat(color = '#9aa5b1') {
 
 // ------------------------------------------------------------- room layout
 export function buildRound(scene, engine, paletteIndex, rand, stage = 0) {
-  return stage === 1
-    ? layoutPlayRoom(scene, engine, paletteIndex, rand)
-    : layoutToyRoom(scene, engine, paletteIndex, rand);
+  switch (stage) {
+    case 1: return layoutPlayRoom(scene, engine, paletteIndex, rand);
+    case 2: return layoutGuragura(scene, engine, paletteIndex, rand);
+    case 3: return layoutKoron(scene, engine, paletteIndex, rand);
+    case 4: return layoutSakasama(scene, engine, paletteIndex, rand);
+    default: return layoutToyRoom(scene, engine, paletteIndex, rand);
+  }
+}
+
+// shared `put` factory for layout functions
+function makePut(scene, engine, out) {
+  return (built, x, z, opt = {}) => {
+    const p = engine.addProp(built.desc, x, z, opt);
+    built.group.position.set(x, opt.y || 0, z);
+    if (opt.yaw) built.group.rotation.y = opt.yaw;
+    scene.add(built.group);
+    out.push({ prop: p, group: built.group, built });
+    return p;
+  };
+}
+
+// ⚖️ ぐらぐらのへや: the whole floor is a seesaw — round things roll
+function layoutGuragura(scene, engine, paletteIndex, rand) {
+  const pal = PALETTES[paletteIndex % PALETTES.length];
+  const A = pal.accents;
+  const out = [];
+  const J = (v) => v + (rand() - 0.5) * 0.5;
+  const put = makePut(scene, engine, out);
+
+  // rolling stars: lots of balls scattered on both sides
+  put(buildBall(A[0], 0.3), J(-4.5), J(1.5));
+  put(buildBall(A[1], 0.24), J(3.8), J(2.6));
+  put(buildBall(A[2], 0.34), J(-2.2), J(-2.2));
+  put(buildBall(A[3], 0.2), J(5.6), J(-1.8));
+  put(buildBall(A[4], 0.28), J(0.6), J(3.4));
+  put(buildBall(A[5], 0.26), J(-6.4), J(-3.4));
+  put(buildDrum(A[3], A[0]), J(2.4), J(4.2));
+  put(buildDuck(pal.duck), J(-3.4), J(3.8));
+  put(buildTeapot(A[1]), J(6.6), J(1.0));
+
+  // friction team: blocks & books hold on until it gets steep
+  {
+    let below = put(buildBlock(A[2], 'A'), -1.2, 0.6);
+    for (let i = 1; i < 4; i++) {
+      below = put(buildBlock(A[(i + 1) % A.length], 'ABCD'[i]), -1.2, 0.6, { y: 0.34 * i, supportId: below.id });
+    }
+    put(buildBlock(A[5], 'E'), J(2.0), J(-3.4));
+    const b1 = put(buildBook(A[0], 0.5), J(-4.8), J(-0.8), { yaw: 0.4 });
+    put(buildBook(A[4], 0.44), b1.x, b1.z, { y: 0.09, supportId: b1.id });
+  }
+  put(buildCrayon(A[0]), J(1.0), J(1.8), { yaw: 0.7 });
+  put(buildCrayon(A[3]), J(-0.6), J(-4.2), { yaw: -1.1 });
+  put(buildDice(), J(0.2), J(-1.4));
+  put(buildMiniCar(A[1]), J(4.6), J(0.2), { yaw: 0.4 });
+  put(buildMiniCar(A[5]), J(-5.8), J(2.6), { yaw: 2.1 });
+
+  // mid & heavy: counterweights that swing the seesaw when eaten
+  put(buildBear(pal.bear), J(-7.2), J(0.6), { yaw: 0.6 });
+  put(buildRobot('#9fb4c7', A[1]), J(6.8), J(3.6), { yaw: -0.8 });
+  put(buildTrain(A[5], A[2]), J(3.2), J(-4.6), { yaw: 0.2 });
+  put(buildXylophone(A), J(-3.8), J(5.0), { yaw: 0.2 });
+  put(buildRockingHorse(A[0], A[4]), J(7.4), J(-4.0), { yaw: 2.2 });
+  put(buildWagon(A[2]), J(-8.0), J(4.6), { yaw: 0.9 });
+  put(buildTricycle(A[1], A[5]), J(0.8), J(5.4), { yaw: -1.8 });
+  put(buildStool(A[3]), J(6.2), J(5.2));
+  put(buildChair(A[2]), J(-6.6), J(-5.0), { yaw: 0.5 });
+  put(buildLamp('#d7c4ac', A[1]), -9.2, -4.8);
+  {
+    const t = buildTable(A[4]);
+    const tp = put(t, 7.8, -2.2);
+    put(buildCup(A[2]), 7.6, -2.1, { y: t.topY, supportId: tp.id });
+    put(buildCup(A[0]), 8.1, -2.4, { y: t.topY, supportId: tp.id });
+  }
+  {
+    const chest = buildToyChest(A[4], A[0]);   // piñata counterweight
+    put(chest, 8.6, 2.8, { yaw: 0.2 });
+  }
+  put(buildWardrobe(pal.bed, A[1]), -8.6, -1.8, { yaw: Math.PI / 2 });
+
+  // wall shelf + friends
+  {
+    const ws = buildWallShelf('#c98d5f');
+    const wp = put(ws, -1.5, -6.5);
+    put(buildBall(A[1], 0.18), -2.0, -6.45, { y: ws.topY, supportId: wp.id });
+    put(buildTeapot(A[3]), -1.2, -6.5, { y: ws.topY, supportId: wp.id });
+  }
+  put(buildDog(), J(4.0), J(-0.6));
+  put(buildBalloonGift(A[5], A[0], A[2]), J(-4.4), J(-5.6));
+
+  return out;
+}
+
+// 📦 コロンのへや: a cardboard box room with the big tipping lever
+function layoutKoron(scene, engine, paletteIndex, rand) {
+  const pal = PALETTES[paletteIndex % PALETTES.length];
+  const A = pal.accents;
+  const out = [];
+  const J = (v) => v + (rand() - 0.5) * 0.5;
+  const put = makePut(scene, engine, out);
+
+  // THE LEVER (usable twice: the box tips, then tips again)
+  put(buildLever(A[2], A[0]), -9.3, -5.2, { yaw: Math.PI / 2 });
+
+  // small & medium toys that will tumble on each コロン
+  put(buildCrayon(A[0]), J(-1.4), J(1.6), { yaw: 0.5 });
+  put(buildCrayon(A[2]), J(0.8), J(2.2), { yaw: -1.0 });
+  put(buildBall(A[4], 0.24), J(-2.8), J(0.6));
+  put(buildBall(A[1], 0.3), J(2.6), J(0.8));
+  put(buildBall(A[5], 0.22), J(0.4), J(3.6));
+  put(buildDice(), J(-0.8), J(0.2));
+  put(buildDice(), J(1.8), J(-1.0));
+  put(buildDuck(pal.duck), J(-3.8), J(2.8));
+  put(buildBoat(A[2]), J(-4.8), J(0.8), { yaw: 0.6 });
+  put(buildMiniCar(A[1]), J(3.6), J(2.4), { yaw: 1.2 });
+  put(buildMiniCar(A[3]), J(4.6), J(-0.8), { yaw: -0.4 });
+  {
+    let below = put(buildBlock(A[0], 'A'), -2.0, 4.0);
+    for (let i = 1; i < 5; i++) {
+      below = put(buildBlock(A[i % A.length], 'ABCDE'[i]), -2.0, 4.0, { y: 0.34 * i, supportId: below.id });
+    }
+  }
+  put(buildBear(pal.bear), J(-6.0), J(3.6), { yaw: 0.4 });
+  put(buildRobot('#9fb4c7', A[1]), J(6.2), J(1.4), { yaw: -0.5 });
+  put(buildTrain(A[5], A[2]), J(-6.8), J(-0.4), { yaw: 0.3 });
+  put(buildDrum(A[3], A[0]), J(5.8), J(4.0));
+  put(buildXylophone(A), J(-4.4), J(5.2), { yaw: -0.2 });
+  put(buildRockingHorse(A[0], A[4]), J(7.0), J(-4.4), { yaw: 2.0 });
+  put(buildWagon(A[2]), J(-8.0), J(4.4), { yaw: 1.0 });
+  put(buildTricycle(A[1], A[5]), J(1.2), J(-4.6), { yaw: -2.2 });
+  put(buildChair(A[2]), J(3.4), J(-3.2), { yaw: 0.6 });
+  put(buildStool(A[3]), J(-4.4), J(-3.4));
+  {
+    const t = buildTable(A[4]);
+    const tp = put(t, 6.8, -2.0);
+    put(buildTeapot(A[0]), 6.6, -2.2, { y: t.topY, supportId: tp.id });
+    put(buildCup(A[2]), 7.1, -1.8, { y: t.topY, supportId: tp.id });
+  }
+  // two bolted shelves: after each コロン they're "on a different wall"
+  {
+    const ws = buildWallShelf('#c98d5f');
+    const wp = put(ws, 2.0, -6.5);
+    put(buildBall(A[2], 0.2), 1.5, -6.45, { y: ws.topY, supportId: wp.id });
+    put(buildBook(A[5], 0.42), 2.6, -6.42, { y: ws.topY, supportId: wp.id });
+  }
+  {
+    const ws2 = buildWallShelf('#c98d5f');
+    const wp2 = put(ws2, -5.5, -6.5);
+    put(buildTeapot(A[1]), -5.6, -6.5, { y: ws2.topY, supportId: wp2.id });
+    put(buildBall(A[0], 0.16), -5.0, -6.55, { y: ws2.topY, supportId: wp2.id });
+  }
+  // the chick family scatters delightfully on every tumble
+  {
+    const hen = put(buildHen(pal.hen), 2.2, -1.8);
+    let prev = hen;
+    for (let i = 0; i < 3; i++) {
+      const chick = buildChick(i === 1 ? '#ffd43b' : '#ffe066');
+      const p = engine.addProp(chick.desc, 2.8 + i * 0.45, -1.5, { followId: prev.id });
+      chick.group.position.set(p.x, 0, p.z);
+      scene.add(chick.group);
+      out.push({ prop: p, group: chick.group, built: chick });
+      prev = p;
+    }
+  }
+  put(buildWardrobe(pal.bed, A[1]), 8.4, 4.4, { yaw: Math.PI });
+  put(buildBalloonGift(A[1], A[4], A[3]), J(6.6), J(2.6));
+  put(buildBook(A[3], 0.46), J(4.2), J(3.4), { yaw: 0.8 });
+  put(buildBall(A[0], 0.2), J(-1.6), J(-2.6));
+
+  return out;
+}
+
+// 🙃 さかさまのへや: shelves everywhere — flip the box to rain them down
+function layoutSakasama(scene, engine, paletteIndex, rand) {
+  const pal = PALETTES[paletteIndex % PALETTES.length];
+  const A = pal.accents;
+  const out = [];
+  const J = (v) => v + (rand() - 0.5) * 0.5;
+  const put = makePut(scene, engine, out);
+
+  // THE FLIP BUTTON (starts charged; recharges as you eat)
+  put(buildFlipButton(A[0], A[2]), 8.9, -0.6);
+
+  // three loaded wall shelves — the flip is how you get these down
+  {
+    const ws = buildWallShelf('#c98d5f');
+    const wp = put(ws, 0.5, -6.5);
+    put(buildBall(A[2], 0.2), 0.0, -6.45, { y: ws.topY, supportId: wp.id });
+    put(buildTeapot(A[3]), 0.8, -6.5, { y: ws.topY, supportId: wp.id });
+    put(buildDice(), 1.4, -6.42, { y: ws.topY, supportId: wp.id });
+  }
+  {
+    const ws = buildWallShelf('#c98d5f');
+    const wp = put(ws, -5.8, -6.5);
+    put(buildBook(A[1], 0.42), -6.2, -6.45, { y: ws.topY, supportId: wp.id });
+    put(buildBall(A[0], 0.17), -5.4, -6.5, { y: ws.topY, supportId: wp.id });
+    put(buildCup(A[5]), -5.9, -6.55, { y: ws.topY, supportId: wp.id });
+  }
+  {
+    const ws = buildWallShelf('#c98d5f');
+    const wp = put(ws, 5.8, -6.5);
+    put(buildBall(A[4], 0.19), 5.3, -6.45, { y: ws.topY, supportId: wp.id });
+    put(buildBlock(A[3], 'Z', 0.28), 6.2, -6.5, { y: ws.topY, supportId: wp.id });
+  }
+  // tall furniture with treasure on top
+  {
+    const s = buildShelf('#c98d5f');
+    const sp = put(s, -8.2, -2.2, { yaw: Math.PI / 2 });
+    put(buildBook(A[1], 0.5), -8.2, -2.4, { y: s.topY, supportId: sp.id });
+    put(buildBall(A[0], 0.2), -8.15, -1.9, { y: s.topY, supportId: sp.id });
+  }
+  {
+    const t = buildTable(A[4]);
+    const tp = put(t, -5.4, 2.8);
+    put(buildTeapot(A[0]), -5.6, 2.6, { y: t.topY, supportId: tp.id });
+    put(buildCup(A[2]), -5.1, 3.0, { y: t.topY, supportId: tp.id });
+    put(buildCup(A[5]), -5.5, 3.2, { y: t.topY, supportId: tp.id });
+  }
+  {
+    const bed = buildBunkBed(pal.bed, A[1]);
+    const bp = put(bed, 7.6, 4.4, { yaw: Math.PI * 0.97 });
+    put(buildBall(A[5], 0.2), 7.4, 4.3, { y: bed.topY, supportId: bp.id });
+    put(buildBear(pal.bear), 7.9, 4.5, { y: bed.topY, supportId: bp.id });
+  }
+  // tall towers (they topple nicely in the rain)
+  for (const [tx, tz] of [[-1.8, 2.2], [3.2, 1.0]]) {
+    let below = put(buildBlock(A[1], 'A'), tx, tz);
+    for (let i = 1; i < 5; i++) {
+      below = put(buildBlock(A[(i + 2) % A.length], 'ABCDE'[i]), tx, tz, { y: 0.34 * i, supportId: below.id });
+    }
+  }
+  // a modest floor crowd
+  put(buildCrayon(A[0]), J(0.6), J(4.2), { yaw: 0.8 });
+  put(buildCrayon(A[4]), J(-2.6), J(4.8), { yaw: -0.6 });
+  put(buildDice(), J(1.6), J(-2.2));
+  put(buildBall(A[1], 0.26), J(-3.2), J(0.4));
+  put(buildMiniCar(A[2]), J(2.4), J(-4.0), { yaw: 0.9 });
+  put(buildDuck(pal.duck), J(-0.8), J(-3.6));
+  put(buildDrum(A[3], A[0]), J(4.6), J(3.6));
+  put(buildStool(A[3]), J(-3.6), J(-4.6));
+  put(buildChair(A[2]), J(5.2), J(-3.8), { yaw: -0.4 });
+  put(buildXylophone(A), J(-6.8), J(5.0), { yaw: 0.3 });
+  put(buildBook(A[0], 0.5), J(-1.2), J(-5.0), { yaw: 0.4 });
+  put(buildBall(A[3], 0.22), J(4.0), J(-1.6));
+  put(buildCat(), J(1.0), J(0.2));
+
+  return out;
 }
 
 function layoutToyRoom(scene, engine, paletteIndex, rand) {
