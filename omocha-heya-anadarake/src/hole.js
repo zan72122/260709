@@ -15,7 +15,7 @@ export class HoleView {
     const shaftGeo = new THREE.CylinderGeometry(1, 1, 1, 40, 1, true);
     const shaftMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
-      uniforms: { uTime: { value: 0 } },
+      uniforms: { uTime: { value: 0 }, uDim: { value: 1 } },
       vertexShader: `
         varying vec2 vUv;
         void main() {
@@ -24,7 +24,7 @@ export class HoleView {
         }`,
       fragmentShader: `
         varying vec2 vUv;
-        uniform float uTime;
+        uniform float uTime, uDim;
         void main() {
           // soft brown mouth fading to black, faint spiral stripes
           vec3 mouth = vec3(0.32, 0.19, 0.11);
@@ -33,7 +33,7 @@ export class HoleView {
           vec3 col = mix(deep, mouth, 1.0 - k);
           float stripe = sin((vUv.x * 14.0 + vUv.y * 5.0) * 3.14159 + uTime * 0.4) * 0.5 + 0.5;
           col *= 0.92 + stripe * 0.08 * (1.0 - k);
-          gl_FragColor = vec4(col, 1.0);
+          gl_FragColor = vec4(col * uDim, 1.0);
         }`,
     });
     this.shaft = new THREE.Mesh(shaftGeo, shaftMat);
@@ -88,6 +88,13 @@ export class HoleView {
     this.time = 0;
   }
 
+  // よるのくに: a bright day-brown shaft would read as a LID in a dark
+  // room, so the mouth dims down with the lights
+  setNight(on) {
+    this.shaft.material.uniforms.uDim.value = on ? 0.22 : 1;
+    this.rim.material.color.set(on ? '#17101c' : '#3d2417');
+  }
+
   // hook the moving-disc discard + rim shading into any Lambert material
   patchFloorMaterial(material) {
     const uHole = this.uHole;
@@ -121,6 +128,16 @@ export class HoleView {
 
   update(dt, hole) {
     this.time += dt;
+    if (this.hidden) {
+      // さかさま: the hole has peeled off the floor and is mid-air as a
+      // falling sheet (main animates it) — the floor shows no hole at all
+      this.uHole.value.set(hole.x, hole.z, 0.001, 0);
+      this.shaft.visible = this.cap.visible = this.rim.visible = this.water.visible = false;
+      return;
+    }
+    if (!this.shaft.visible) {
+      this.shaft.visible = this.cap.visible = this.rim.visible = true;
+    }
     const r = Math.max(0.06, hole.rShow);
     this.uHole.value.set(hole.x, hole.z, r, hole.water);
 

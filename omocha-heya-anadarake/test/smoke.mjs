@@ -71,16 +71,26 @@ function playStage(stage, seed) {
   const total = eng.remaining();
   const dt = 1 / 60;
   let steps = 0;
-  const MAX_STEPS = 60 * 900;
+  const MAX_STEPS = 60 * 1200;
   let launches = 0;
   let maxTilt = 0;
+  let koronWave = 0;         // stand-in for main.js state.koronWave
+  let nightSpawned = false;  // stand-in for the よるのくに entry
+  let flips = 0;
 
   while (eng.remaining() > 0 && steps < MAX_STEPS) {
     const r = eng.hole.r;
     let goto_ = null, bestD = Infinity;
-    let balloon = null, shakeSupport = null;
+    let balloon = null, shakeSupport = null, device = null;
 
     for (const p of eng.props) {
+      // a kid ALWAYS runs to a big glowing lever / charged button first
+      const dv = p.desc.device;
+      if (dv) {
+        if (dv.type === 'lever' && dv.count > 0 && !dv.busy) device = p;
+        if (dv.type === 'flip' && dv.charge >= dv.need && !dv.busy && flips < 2) device = p;
+        if (dv.type === 'cellardoor' && !dv.open) device = p;
+      }
       if (p.state === S.BALLOON) { balloon = balloon || p; continue; }
       if (p.supportId && p.state !== S.GONE) {
         const sup = eng.byId.get(p.supportId);
@@ -99,7 +109,9 @@ function playStage(stage, seed) {
       if (bias < bestD) { bestD = bias; goto_ = t; }
     }
 
-    if (goto_) {
+    if (device) {
+      eng.setHoleTarget(device.x, device.z);               // pull the lever!
+    } else if (goto_) {
       eng.setHoleTarget(goto_.x, goto_.z);
     } else if (shakeSupport) {
       eng.setHoleTarget(shakeSupport.x, shakeSupport.z);   // park & rattle
@@ -123,9 +135,67 @@ function playStage(stage, seed) {
     for (const ev of eng.events) {
       seen.add(ev.type);
       // stand in for main.js: finish the box-turning cinematics instantly
-      if (ev.type === 'lever' || ev.type === 'flip') {
+      if (ev.type === 'lever') {
+        koronWave++;
         eng.rainAll({ stagger: 0.06, yMin: 3.5, ySpan: 2.5, scatter: 2 });
         ev.p.desc.device.busy = false;
+        if (koronWave === 1) {
+          // 壁のものが床のものに + らくがきが本物に (main.js mirror)
+          eng.dropSpawn(makeDesc('clocktoy', 0.84, 0.84, 0.24, { round: true }), 4.6, -4.0, { delay: 0.4 });
+          eng.dropSpawn(makeDesc('picturetoy', 0.9, 0.08, 0.9), -3.0, -4.0, { delay: 0.5 });
+          eng.dropSpawn(makeDesc('picturetoy', 0.9, 0.08, 0.9), 6.9, -4.0, { delay: 0.6 });
+          eng.burstSpawn([
+            makeDesc('star', 0.4, 0.2, 0.4, { round: true }),
+            makeDesc('minicar', 0.5, 0.35, 0.3),
+            makeDesc('flower', 0.34, 0.6, 0.34, { round: true }),
+          ], -2, -5.4);
+        } else if (koronWave === 2) {
+          // とびらが床に来た
+          eng.addProp(makeDesc('cellardoor', 1.5, 0.25, 1.2, {
+            fixture: true, device: { type: 'cellardoor', open: false },
+          }), 4.2, -1.5);
+        }
+      }
+      if (ev.type === 'flip') {
+        flips++;
+        eng.rainAll({ stagger: 0.06, yMin: 3.5, ySpan: 2.5, scatter: 2 });
+        ev.p.desc.device.busy = false;
+        if (!nightSpawned) {
+          nightSpawned = true;
+          // よるのくに toys (main.js spawnNightToys mirror)
+          const night = [
+            ['egg', 'chick'], ['egg', 'chick'], ['egg', 'chick'],
+            ['acorn', 'tree'], ['acorn', 'tree'],
+            ['sock', 'sockpair'], ['painttube', 'rainbowball'],
+            ['star', null], ['star', null], ['star', null],
+            ['fireflyjar', null], ['dreambunny', null],
+          ];
+          night.forEach(([kind, magic], i) => {
+            eng.dropSpawn(makeDesc(kind, 0.3, 0.3, 0.3, { round: true, magic }),
+              -6 + i, (i % 3) * 2 - 2, { delay: 0.2 + i * 0.1 });
+          });
+        }
+      }
+      if (ev.type === 'magic') {
+        // たまごのまほう: the eaten toy comes back transformed
+        const descs = ev.kind === 'chick'
+          ? [makeDesc('chick', 0.24, 0.35, 0.24, { round: true, walker: { speed: 1.1, flee: 2.0 } })]
+          : ev.kind === 'sockpair'
+            ? [makeDesc('sock', 0.2, 0.4, 0.34), makeDesc('sock', 0.2, 0.4, 0.34)]
+            : ev.kind === 'tree'
+              ? [makeDesc('minitree', 0.56, 0.9, 0.56, { round: true })]
+              : [makeDesc('rainbowball', 0.48, 0.48, 0.48, { round: true })];
+        eng.burstSpawn(descs, ev.x, ev.z);
+      }
+      if (ev.type === 'cellarDoor') {
+        // treasure pops out of the trapdoor (main.js mirror)
+        const treasure = [];
+        for (let i = 0; i < 6; i++) {
+          treasure.push(i % 2 === 0
+            ? makeDesc('candy', 0.36, 0.18, 0.18, { name: 'candy' })
+            : makeDesc('ball', 0.24, 0.24, 0.24, { round: true, name: 'mini ball' }));
+        }
+        eng.burstSpawn(treasure, ev.x, ev.z);
       }
       if (ev.type === 'pinata') {
         const minis = [];
@@ -160,16 +230,26 @@ check(eng1.props.some((p) => p.desc.walker && p.desc.walker.kind === 'cat'), 'st
 check(eng1.props.some((p) => p.desc.device && p.desc.device.type === 'slide'), 'stage 1: has the slide');
 const { maxTilt: tilt2 } = playStage(2, 1027);
 check(tilt2 > 0.02, `stage 2: the seesaw floor actually tilted (max ${tilt2.toFixed(3)})`);
+check(seen.has('tiltSurgeStart') && seen.has('tiltSurgeEnd'),
+  `stage 2: the pegged floor gave way into a なだれ (maxTilt ${tilt2.toFixed(2)})`);
+check(tilt2 > 0.25, 'stage 2: the avalanche slope went far past the seesaw limit');
 const { eng: eng3 } = playStage(3, 1031);
 check(eng3.props.some((p) => p.desc.device && p.desc.device.type === 'lever'), 'stage 3: has the コロン lever');
+check(eng3.props.some((p) => p.desc.device && p.desc.device.type === 'walldecor'), 'stage 3: wall clock & pictures on the wall');
+check(eng3.props.some((p) => p.desc.device && p.desc.device.type === 'cellardoor' && p.desc.device.open),
+  'stage 3: the cellar door appeared after the 2nd コロン and was opened');
+check(eng3.puddles.length >= 1, `stage 3: paint pots left ${eng3.puddles.length} colour puddles on the floor`);
 const { eng: eng4 } = playStage(4, 1049);
 check(eng4.props.some((p) => p.desc.device && p.desc.device.type === 'flip'), 'stage 4: has the flip button');
+check(eng4.props.some((p) => p.desc.magic === 'chick'), 'stage 4: よるのくに eggs joined the round');
 
 // (catapult is covered deterministically in physics-test.mjs — in a free
 // play-through the bot may shake the ball off the seesaw before flipping it)
 for (const t of ['fallStart', 'topple', 'tipStart', 'wallBump', 'swallow', 'waterFill',
   'glug', 'detach', 'shakeRattle', 'slideOff', 'pinata', 'catchWalker', 'walkerCry',
-  'seesawFlip', 'cupboardOpen', 'tramp', 'slideExit', 'burp', 'catJump', 'dogNudge']) {
+  'seesawFlip', 'cupboardOpen', 'tramp', 'slideExit', 'burp', 'catJump', 'dogNudge',
+  'lever', 'flip', 'paintSpill', 'puddle', 'dyed', 'magic', 'cellarDoor',
+  'tiltSurgeStart', 'tiltSurgeEnd']) {
   check(seen.has(t), `feel: ${t} happened during normal clears`);
 }
 console.log('    event types seen:', [...seen].sort().join(', '));

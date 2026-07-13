@@ -635,5 +635,111 @@ const threeYaw = (yaw, lx, lz) => {
   check(ball.state === S.GONE, 'freeze: physics resumes afterwards');
 }
 
+// ================================================================ v6
+// ---------------------------------------------------------------- なだれ (tilt surge)
+{
+  const eng = new HoleEngine({ roomW: 20, roomD: 14, holeR: 0.6, holeX: 8, holeZ: 6, seed: 7, tiltFloor: true });
+  eng.setHoleTarget(8, 6);
+  // a very one-sided room: the tilt pegs at the limit and holds there
+  for (let i = 0; i < 4; i++) eng.addProp(makeDesc('chest', 1.4, 1.0, 0.9), 7 - i * 0.5, -4 + i * 2);
+  const box = eng.addProp(makeDesc('block', 0.4, 0.4, 0.4), -2, 1.5);
+  const ball = eng.addProp(makeDesc('ball', 0.4, 0.4, 0.4, { round: true }), -6, 6);
+  let evs = run(eng, 1);
+  check(!has(evs, 'tiltSurgeStart'), 'surge: not before the tilt has held at the limit');
+  evs = run(eng, 3);
+  check(has(evs, 'tiltSurgeStart'), 'surge: a pegged seesaw floor gives way into an avalanche');
+  check(eng.surging, 'surge: engine reports the avalanche');
+  const bx = box.x;
+  run(eng, 2.5);
+  check(Math.abs(eng.tilt) > eng.maxTilt * 1.5, `surge: the floor heaves far past the normal limit (tilt=${eng.tilt.toFixed(2)})`);
+  check(box.x - bx > 0.8, `surge: even a friction box slides downhill (moved ${(box.x - bx).toFixed(2)})`);
+  evs = run(eng, 4);
+  check(has(evs, 'tiltSurgeEnd'), 'surge: the avalanche settles down again');
+  run(eng, 4);   // give the spring time to ease the floor back
+  check(!eng.surging && Math.abs(eng.tilt) <= eng.maxTilt + 0.05,
+    `surge: tilt relaxes back inside the seesaw limit (tilt=${eng.tilt.toFixed(2)})`);
+}
+{
+  // 流しそうめん: park the hole at the low end — the avalanche feeds it
+  const eng = new HoleEngine({ roomW: 20, roomD: 14, holeR: 0.6, holeX: 8, holeZ: 0, seed: 7, tiltFloor: true });
+  eng.setHoleTarget(8, 0);
+  for (let i = 0; i < 4; i++) eng.addProp(makeDesc('chest', 1.4, 1.0, 0.9), 7 - i * 0.5, -4 + i * 2.6);
+  const ball = eng.addProp(makeDesc('ball', 0.4, 0.4, 0.4, { round: true }), -7, 0);
+  run(eng, 12);
+  check(ball.state === S.GONE, 'surge: a far-uphill ball avalanches all the way into the waiting hole');
+}
+
+// ---------------------------------------------------------------- 絵の具
+{
+  const eng = makeEngine(0.5, 8, 6);
+  // a paint pot dropped from shelf height bursts into a puddle
+  const pot = eng.addProp(makeDesc('paintpot', 0.29, 0.3, 0.29, { round: true, paint: '#ff5f5f' }), 0, 0, { state: 'tossed' });
+  pot.y = 3; pot.vy = 0; pot.bounces = 0;
+  const evs = run(eng, 2);
+  check(has(evs, 'paintSpill'), 'paint: the pot bursts on a hard landing');
+  check(has(evs, 'puddle', (e) => e.color === '#ff5f5f'), 'paint: a red puddle appears');
+  check(eng.puddles.length === 1, 'paint: the engine remembers the stain');
+  check(!has(run(eng, 2), 'paintSpill'), 'paint: it only bursts once');
+  // toys that wander/settle in the puddle get dyed — once
+  const dice = eng.addProp(makeDesc('dice', 0.3, 0.3, 0.3), pot.x + 0.2, pot.z, { state: 'tossed' });
+  dice.y = 1.5; dice.bounces = 0;
+  const evs2 = run(eng, 3);
+  check(has(evs2, 'dyed', (e) => e.color === '#ff5f5f'), 'paint: a toy landing in the puddle is dyed red');
+  check(dice.dye === '#ff5f5f', 'paint: the dye sticks to the prop');
+  check(!has(run(eng, 2), 'dyed', (e) => e.p === dice), 'paint: no re-dye spam');
+  // a walker strolling through paint gets dyed too
+  const hen = eng.addProp(
+    makeDesc('hen', 0.5, 0.7, 0.5, { round: true, walker: { speed: 1.2, flee: 2.3 } }), pot.x, pot.z);
+  hen.state = S.WANDER;
+  run(eng, 4);
+  check(hen.dye === '#ff5f5f', 'paint: the strolling hen walked through the puddle and is red now');
+}
+
+// ---------------------------------------------------------------- 地下のとびら
+{
+  const eng = makeEngine(0.5, 6, 6);
+  const door = eng.addProp(makeDesc('cellardoor', 1.5, 0.25, 1.2, {
+    fixture: true, device: { type: 'cellardoor', open: false },
+  }), 0, 0);
+  let evs = run(eng, 1);
+  check(!has(evs, 'cellarDoor'), 'cellar: closed while the hole is far away');
+  eng.setHoleTarget(0, 0);
+  evs = run(eng, 2);
+  check(has(evs, 'cellarDoor'), 'cellar: the hole rattles the trapdoor open');
+  check(door.desc.device.open, 'cellar: it stays open');
+  check(!has(run(eng, 2), 'cellarDoor'), 'cellar: opens only once');
+  check(door.state !== S.GONE, 'cellar: the trapdoor itself is never swallowed');
+}
+
+// ---------------------------------------------------------------- たまごのまほう
+{
+  const eng = makeEngine(0.8, 0, 0);
+  const egg = eng.addProp(makeDesc('egg', 0.28, 0.36, 0.28, { round: true, magic: 'chick' }), 0.05, 0);
+  const evs = run(eng, 4);
+  check(egg.state === S.GONE, 'magic: the egg is eaten like anything else');
+  const m = evs.find((e) => e.type === 'magic');
+  check(!!m && m.kind === 'chick', 'magic: a beat later the hole announces the transformation');
+  check(has(evs, 'swallow') && evs.indexOf(m) > evs.findIndex((e) => e.type === 'swallow'),
+    'magic: the announcement comes AFTER the gulp');
+  // the transformed toy spawns via burstSpawn and is a real catchable prop
+  const chick = eng.burstSpawn([makeDesc('chick', 0.24, 0.35, 0.24, {
+    round: true, walker: { speed: 1.1, flee: 2.0 },
+  })], m.x, m.z)[0];
+  chase(eng, chick, 10);
+  check(chick.state === S.GONE, 'magic: the hatched chick can be chased down and caught');
+}
+
+// ---------------------------------------------------------------- dropSpawn
+{
+  const eng = makeEngine(0.6, 8, 6);
+  const p = eng.dropSpawn(makeDesc('clocktoy', 0.84, 0.84, 0.24, { round: true }), -2, 1, { delay: 0.3 });
+  check(p.state === S.TOSSED && p._raining && p.t < 0, 'dropSpawn: waits invisibly in the sky');
+  run(eng, 4);
+  check(p.y === 0 && (p.state === S.REST || p.state === S.TEETER),
+    `dropSpawn: the wall clock landed on the floor (y=${p.y.toFixed(2)}, ${p.state})`);
+  chase(eng, p, 6);
+  check(p.state === S.GONE, 'dropSpawn: and it is swallowable like any toy');
+}
+
 console.log(ok ? 'PHYSICS PASS' : 'PHYSICS FAIL');
 process.exit(ok ? 0 : 1);

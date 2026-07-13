@@ -98,7 +98,7 @@ function windowTexture(pal) {
     ctx.fillStyle = pal.sky;
     ctx.fillRect(16, 16, w - 32, h - 32);
     // sun / moon + cloud
-    if (pal.name === 'yozora') {
+    if (pal.name === 'yozora' || pal.name === 'yoru') {
       ctx.fillStyle = '#fff3b0';
       ctx.beginPath(); ctx.arc(w * 0.68, h * 0.3, 34, 0, 7); ctx.fill();
       ctx.fillStyle = pal.sky;
@@ -132,6 +132,44 @@ function artTexture(emoji, bg) {
   });
 }
 
+// らくがきスポット: after a コロン these crayon doodles pop into REAL toys.
+// u is the horizontal texture position on the back wall.
+export const DOODLE_SPOTS = [
+  { u: 0.22, kind: 'star' },
+  { u: 0.5, kind: 'car' },
+  { u: 0.78, kind: 'flower' },
+];
+
+function drawDoodle(ctx, kind, cx, cy, s) {
+  ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (kind === 'star') {
+    ctx.strokeStyle = 'rgba(255,214,80,0.9)';
+    ctx.beginPath();
+    for (let i = 0; i <= 10; i++) {
+      const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
+      const r = i % 2 === 0 ? s : s * 0.45;
+      ctx[i ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+    }
+    ctx.stroke();
+  } else if (kind === 'car') {
+    ctx.strokeStyle = 'rgba(255,120,120,0.9)';
+    ctx.strokeRect(cx - s, cy - s * 0.15, s * 2, s * 0.6);          // body
+    ctx.strokeRect(cx - s * 0.45, cy - s * 0.6, s * 0.9, s * 0.45); // cabin
+    ctx.beginPath(); ctx.arc(cx - s * 0.55, cy + s * 0.62, s * 0.26, 0, 7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx + s * 0.55, cy + s * 0.62, s * 0.26, 0, 7); ctx.stroke();
+  } else {
+    ctx.strokeStyle = 'rgba(255,170,220,0.95)';
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * s * 0.6, cy + Math.sin(a) * s * 0.6, s * 0.35, 0, 7);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,230,120,0.95)';
+    ctx.beginPath(); ctx.arc(cx, cy, s * 0.3, 0, 7); ctx.stroke();
+  }
+}
+
 // cardboard-box look for コロンのへや
 function cardboardTex(w, h, pal, opts = {}) {
   return tex(w, h, (ctx) => {
@@ -155,6 +193,10 @@ function cardboardTex(w, h, pal, opts = {}) {
     ctx.beginPath();
     ctx.moveTo(w * 0.74, h * 0.72); ctx.lineTo(w * 0.79, h * 0.6);
     ctx.lineTo(w * 0.84, h * 0.72); ctx.lineTo(w * 0.89, h * 0.6); ctx.stroke();
+    // the magic doodles (they disappear once they've become real toys)
+    if (opts.doodles) {
+      for (const d of DOODLE_SPOTS) drawDoodle(ctx, d.kind, w * d.u, h * 0.42, h * 0.16);
+    }
     if (opts.label) {
       // toy-box label sticker
       ctx.fillStyle = '#fffdf5';
@@ -166,6 +208,15 @@ function cardboardTex(w, h, pal, opts = {}) {
     }
   });
 }
+
+// よるのくに: the hidden night room on the other side of the box
+const NIGHT_PAL = {
+  name: 'yoru',
+  wall: '#232a55', wallLow: '#151a38', floorA: '#3b3563', floorB: '#332d57',
+  rug: '#ffd166', rugRim: '#8478c8', sky: '#0d1230',
+  accents: ['#74c0fc', '#f783ac', '#ffe066', '#63e6be', '#b197fc', '#ffa8a8'],
+  bear: '#8d6e63', duck: '#fff59d', bed: '#b197fc', tub: '#eef2ff', hen: '#f4f0ff',
+};
 
 export class Room {
   constructor(scene, holeView, container = null) {
@@ -190,7 +241,8 @@ export class Room {
   }
 
   build(paletteIndex, opts = {}) {
-    const pal = PALETTES[paletteIndex % PALETTES.length];
+    const night = !!opts.night;
+    const pal = night ? NIGHT_PAL : PALETTES[paletteIndex % PALETTES.length];
     if (this.group) {
       this.container.remove(this.group);
       this.group.traverse((o) => { if (o.material && o.material.map) o.material.map.dispose(); });
@@ -198,12 +250,14 @@ export class Room {
     const g = new THREE.Group();
     this.group = g;
     const boxy = !!opts.boxy;
+    const starry = pal.name === 'yozora' || night;
 
     this.scene.background = new THREE.Color(pal.wallLow);
     this.scene.fog = new THREE.Fog(pal.wallLow, 30, 60);
-    this.hemi.color.set(pal.name === 'yozora' ? '#dfe6ff' : '#fff5e0');
-    this.hemi.intensity = pal.name === 'yozora' ? 0.8 : 0.95;
-    this.sun.color.set(pal.name === 'yozora' ? '#cdd7ff' : pal.name === 'yuuyake' ? '#ffd9a8' : '#fff2d8');
+    this.hemi.color.set(night ? '#8fa0e8' : pal.name === 'yozora' ? '#dfe6ff' : '#fff5e0');
+    this.hemi.intensity = night ? 0.62 : pal.name === 'yozora' ? 0.8 : 0.95;
+    this.sun.color.set(night ? '#aab7ff' : pal.name === 'yozora' ? '#cdd7ff' : pal.name === 'yuuyake' ? '#ffd9a8' : '#fff2d8');
+    this.sun.intensity = night ? 0.7 : 1.35;
 
     // floor — the hole discard shader is patched into this material
     const floorMat = new THREE.MeshLambertMaterial({
@@ -226,14 +280,16 @@ export class Room {
 
     // walls: back + left + right (front stays open for the camera)
     const wallMatBack = new THREE.MeshLambertMaterial({
-      map: boxy ? cardboardTex(1024, 256, pal) : wallTexture(pal, { stars: pal.name === 'yozora' }),
+      map: boxy
+        ? cardboardTex(1024, 256, pal, { doodles: opts.doodles !== false })
+        : wallTexture(pal, { stars: starry }),
     });
     const back = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W + 0.4, WALL_H), wallMatBack);
     back.position.set(0, WALL_H / 2, -ROOM_D / 2 - 0.05);
     back.receiveShadow = true;
     g.add(back);
 
-    const sideTex = boxy ? cardboardTex(1024, 256, pal) : wallTexture(pal, { stars: pal.name === 'yozora' });
+    const sideTex = boxy ? cardboardTex(1024, 256, pal) : wallTexture(pal, { stars: starry });
     for (const s of [-1, 1]) {
       const side = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D + 0.4, WALL_H), new THREE.MeshLambertMaterial({ map: sideTex }));
       side.position.set(s * (ROOM_W / 2 + 0.05), WALL_H / 2, 0);
@@ -248,7 +304,7 @@ export class Room {
     const front = new THREE.Mesh(
       new THREE.PlaneGeometry(ROOM_W + 0.4, WALL_H),
       new THREE.MeshLambertMaterial({
-        map: boxy ? cardboardTex(1024, 256, pal) : wallTexture(pal, { stars: pal.name === 'yozora' }),
+        map: boxy ? cardboardTex(1024, 256, pal) : wallTexture(pal, { stars: starry }),
       })
     );
     front.position.set(0, WALL_H / 2, ROOM_D / 2 + 0.05);
@@ -278,7 +334,7 @@ export class Room {
     }
 
     // wall art
-    const arts = boxy ? [] : pal.name === 'yozora' ? ['🌙', '⭐'] : ['🚂', '🦆'];
+    const arts = boxy ? [] : starry ? ['🌙', '⭐'] : ['🚂', '🦆'];
     arts.forEach((e, i) => {
       const art = new THREE.Mesh(
         new THREE.PlaneGeometry(1.3, 1.3),
@@ -304,6 +360,39 @@ export class Room {
       );
       knob.position.set(ROOM_W / 2 - 0.1, 1.8, 1.9);
       g.add(knob);
+    }
+
+    // よるのくに: fairy lights + a big glowing moon so the night side feels
+    // like a secret place, not just a dark room
+    if (night) {
+      const bulbCols = ['#ffd166', '#ff8fa3', '#8ce99a', '#6cc5ff'];
+      for (let i = 0; i < 12; i++) {
+        const t = i / 11;
+        const bulb = new THREE.Mesh(
+          new THREE.SphereGeometry(0.09, 8, 6),
+          new THREE.MeshLambertMaterial({
+            color: bulbCols[i % 4], emissive: bulbCols[i % 4], emissiveIntensity: 0.9,
+          })
+        );
+        bulb.position.set(
+          -ROOM_W / 2 + 1 + t * (ROOM_W - 2),
+          4.35 - Math.abs(Math.sin(t * Math.PI * 3)) * 0.4,
+          -ROOM_D / 2 + 0.15
+        );
+        g.add(bulb);
+      }
+      const moon = new THREE.Mesh(
+        new THREE.CircleGeometry(0.95, 24),
+        new THREE.MeshBasicMaterial({ color: '#fff3b0' })
+      );
+      moon.position.set(6.8, 4.0, -ROOM_D / 2 + 0.04);
+      g.add(moon);
+      const crescent = new THREE.Mesh(
+        new THREE.CircleGeometry(0.82, 24),
+        new THREE.MeshBasicMaterial({ color: pal.wall })
+      );
+      crescent.position.set(7.15, 4.18, -ROOM_D / 2 + 0.05);
+      g.add(crescent);
     }
 
     this.container.add(g);
