@@ -449,6 +449,35 @@ export class AudioEngine {
     for (let i = 0; i < 5; i++) this._tone(400 + i * 130, t + i * 0.07, 0.2, 'sine', 0.07, (400 + i * 130) * 1.4);
   }
 
+  // the hole sheet lands: a wet cartoon thwack
+  splat() {
+    if (!this._ok()) return;
+    const t = this._now();
+    this._noise(t, 0.18, { freq: 300, bendTo: 90, q: 0.7, vol: 0.3 });
+    this._tone(150, t, 0.22, 'sine', 0.24, 60);
+    this._tone(90, t + 0.05, 0.3, 'sine', 0.16, 45);
+    this._noise(t + 0.1, 0.12, { freq: 1400, bendTo: 500, vol: 0.06 });
+  }
+
+  // なだれ: long rolling rumble while the whole floor gives way
+  avalanche() {
+    if (!this._ok('avalanche', 0.55)) return;
+    const t = this._now();
+    this._noise(t, 0.7, { type: 'lowpass', freq: 240, q: 0.6, vol: 0.26 });
+    this._tone(46 + Math.random() * 14, t, 0.6, 'sine', 0.18, 34);
+    this._noise(t + 0.2, 0.4, { freq: 500, bendTo: 200, vol: 0.08 });
+  }
+
+  // たまごのまほう: a tiny ascending spell
+  magic() {
+    if (!this._ok()) return;
+    const t = this._now();
+    [0, 4, 7, 12, 16].forEach((st, i) => {
+      this._tone(880 * Math.pow(2, st / 12), t + i * 0.07, 0.3, 'sine', 0.08);
+      this._tone(1760 * Math.pow(2, st / 12), t + i * 0.07, 0.18, 'triangle', 0.03);
+    });
+  }
+
   detach() {
     if (!this._ok('detach', 0.1)) return;
     const t = this._now();
@@ -478,6 +507,12 @@ export class AudioEngine {
     }
   }
 
+  // よるのくに: swap the BGM into a sleepy music-box lullaby
+  setNight(on) {
+    this.night = !!on;
+    if (this._bgmGain) this._bgmGain.gain.value = on ? 0.3 : 0.42;
+  }
+
   // ------------------------------------------------ BGM: lazy toy piano
   _startBgm() {
     const c = this.ctx;
@@ -488,10 +523,22 @@ export class AudioEngine {
     // I–vi–IV–V toybox loop, pentatonic sprinkles on top
     const bass = [0, 0, -3, -3, -7, -7, -5, -5];
     const melody = [12, 16, 14, 19, 12, 9, 14, 16, 12, 7, 9, 14, 16, 12, 9, 7];
+    // night: a slower, higher music-box line over a soft drone
+    const nightMelody = [12, 16, 19, 24, 19, 16, 14, 12, 9, 12, 16, 12];
     const step = () => {
       if (!this.ctx || !this.enabled) return;
       const t = this._now();
       const i = this._bgmStep;
+      if (this.night) {
+        if (i % 3 === 0) {
+          const m = 523 * Math.pow(2, nightMelody[(i / 3) % nightMelody.length] / 12);
+          this._tone(m, t, 1.3, 'sine', 0.05, null, bgm);
+          this._tone(m * 2.005, t, 0.7, 'sine', 0.014, null, bgm);
+        }
+        if (i % 8 === 0) this._tone(131, t, 2.0, 'sine', 0.04, null, bgm);
+        this._bgmStep++;
+        return;
+      }
       if (i % 2 === 0) {
         const b = 262 * Math.pow(2, (bass[(i / 2) % bass.length] - 12) / 12);
         this._tone(b, t, 0.9, 'sine', 0.055, null, bgm);

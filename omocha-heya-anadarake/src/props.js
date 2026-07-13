@@ -558,6 +558,77 @@ export function spawnPinataContents(scene, engine, paletteIndex, x, z, count = 9
   return out;
 }
 
+// --------------------------------------------------- v6 spawners
+// よるのくに: toys that only exist on the night side of the box (~12).
+// eggs/acorns/socks/paint tubes come back TRANSFORMED after being eaten.
+export function spawnNightToys(scene, engine, rand) {
+  const spots = [
+    [buildEgg(), -3.5, 1.5], [buildEgg(), 2.5, -2.5], [buildEgg(), 5.5, 2.5],
+    [buildAcorn(), -6.0, -3.0], [buildAcorn(), 1.0, 4.0],
+    [buildSock('#ff8fa3'), -1.5, -4.5],
+    [buildPaintTube('#6cc5ff'), 4.0, -4.4],
+    [buildStarShard('#ffe066'), -5.0, 4.0],
+    [buildStarShard('#ffd43b'), 0.5, 0.5],
+    [buildStarShard('#fff3b0'), 7.0, -2.0],
+    [buildFireflyJar(), -2.5, 3.5],
+    [buildDreamBunny(), 3.0, 3.8],
+  ];
+  const out = [];
+  spots.forEach(([built, x, z], i) => {
+    const p = engine.dropSpawn(built.desc,
+      x + (rand() - 0.5) * 0.8, z + (rand() - 0.5) * 0.8,
+      { delay: 0.35 + i * 0.14, y: 5 + rand() * 2.5 });
+    built.group.position.set(p.x, p.y, p.z);
+    scene.add(built.group);
+    out.push({ prop: p, group: built.group, built });
+  });
+  return out;
+}
+
+// たまごのまほう: the transformed toy pops UP out of the hole
+export function spawnMagicToy(scene, engine, kind, x, z) {
+  const builds =
+    kind === 'chick' ? [buildChick('#fff1a8')]
+      : kind === 'tree' ? [buildMiniTree()]
+        : kind === 'sockpair' ? [buildSock('#8ce99a', { plain: true }), buildSock('#8ce99a', { plain: true })]
+          : [buildRainbowBall()];
+  const out = [];
+  for (const built of builds) {
+    const [p] = engine.burstSpawn([built.desc], x, z);
+    p.vy = 8.5 + engine.rand() * 2;
+    built.group.position.set(p.x, p.y, p.z);
+    scene.add(built.group);
+    out.push({ prop: p, group: built.group, built });
+  }
+  return out;
+}
+
+// コロン: a wall thing turns into its floor version and tumbles down
+export function spawnWallToy(scene, engine, dev, paletteIndex, x, z) {
+  const pal = PALETTES[paletteIndex % PALETTES.length];
+  const built = dev.becomes === 'clock'
+    ? buildClockToy(pal.accents[1], pal.accents[0])
+    : buildPictureToy(dev.art || '🚗', dev.bg || pal.accents[2]);
+  const p = engine.dropSpawn(built.desc, x, z,
+    { y: 5 + engine.rand(), vx: (engine.rand() - 0.5) * 2.5, delay: 0.3 + engine.rand() * 0.4 });
+  built.group.position.set(p.x, p.y, p.z);
+  scene.add(built.group);
+  return { prop: p, group: built.group, built };
+}
+
+// コロン: a crayon doodle on the cardboard pops into a REAL toy
+export function spawnDoodleToy(scene, engine, paletteIndex, kind, x, z) {
+  const pal = PALETTES[paletteIndex % PALETTES.length];
+  const built = kind === 'star' ? buildStarShard('#ffd43b')
+    : kind === 'car' ? buildMiniCar(pal.accents[0])
+      : buildFlower(pal.accents[1], '#ffd166');
+  const [p] = engine.burstSpawn([built.desc], x, z);
+  p.vy = 6 + engine.rand() * 2;
+  built.group.position.set(p.x, p.y, p.z);
+  scene.add(built.group);
+  return { prop: p, group: built.group, built };
+}
+
 export function buildBathtub(color) {
   const g = new THREE.Group();
   const tub = add(g, G('cyl', 0.62, 0.5, 0.55, 18), mat(color), 0, 0.35, 0);
@@ -825,6 +896,253 @@ export function buildFlipButton(color, accent) {
   };
 }
 
+// --------------------------------------------------- v6: コロンの壁の住人
+// wall decor that "becomes a floor thing" when its wall becomes the floor
+
+function clockFaceTex(accent) {
+  return canvasTex(128, 128, (ctx, w, h) => {
+    ctx.fillStyle = '#fffdf5';
+    ctx.beginPath(); ctx.arc(w / 2, h / 2, w * 0.46, 0, 7); ctx.fill();
+    ctx.strokeStyle = accent; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.arc(w / 2, h / 2, w * 0.46, 0, 7); ctx.stroke();
+    ctx.fillStyle = '#4a3428';
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(w / 2 + Math.cos(a) * w * 0.36, h / 2 + Math.sin(a) * w * 0.36, i % 3 === 0 ? 5 : 3, 0, 7);
+      ctx.fill();
+    }
+    ctx.strokeStyle = '#4a3428'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(w / 2, h / 2); ctx.lineTo(w / 2 + w * 0.2, h / 2 - h * 0.1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(w / 2, h / 2); ctx.lineTo(w / 2 - w * 0.05, h / 2 - h * 0.28); ctx.stroke();
+  });
+}
+
+export function buildWallClock(color, accent) {
+  const g = new THREE.Group();
+  add(g, G('cyl', 0.45, 0.45, 0.12, 20), mat(color), 0, 0, 0, Math.PI / 2, 0, 0);
+  const face = new THREE.Mesh(G('cyl', 0.4, 0.4, 0.04, 20),
+    new THREE.MeshLambertMaterial({ map: clockFaceTex(accent) }));
+  face.rotation.x = Math.PI / 2;
+  face.position.z = 0.06;
+  g.add(face);
+  add(g, G('sph', 0.05, 8, 6), mat(accent), 0, 0.48, 0);
+  return {
+    group: g,
+    desc: makeDesc('wallclock', 0.9, 0.9, 0.2, {
+      fixture: true, name: 'wall clock',
+      device: { type: 'walldecor', becomes: 'clock' },
+    }),
+  };
+}
+
+export function buildWallPicture(emoji, bg) {
+  const g = new THREE.Group();
+  const tex = canvasTex(160, 160, (ctx, w, h) => {
+    ctx.fillStyle = '#fffdf5'; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = bg; ctx.fillRect(12, 12, w - 24, h - 24);
+    ctx.font = '76px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, w / 2, h / 2 + 6);
+  });
+  const m = new THREE.Mesh(G('box', 1.0, 1.0, 0.06), new THREE.MeshLambertMaterial({ map: tex }));
+  m.castShadow = true;
+  g.add(m);
+  return {
+    group: g,
+    desc: makeDesc('wallpic', 1.0, 1.0, 0.12, {
+      fixture: true, name: 'wall picture',
+      device: { type: 'walldecor', becomes: 'picture', art: emoji, bg },
+    }),
+  };
+}
+
+// the floor versions they turn into
+export function buildClockToy(color, accent) {
+  const g = new THREE.Group();
+  add(g, G('cyl', 0.42, 0.42, 0.14, 20), mat(color), 0, 0.21, 0, Math.PI / 2, 0, 0);
+  const face = new THREE.Mesh(G('cyl', 0.37, 0.37, 0.05, 20),
+    new THREE.MeshLambertMaterial({ map: clockFaceTex(accent) }));
+  face.rotation.x = Math.PI / 2;
+  face.position.set(0, 0.21, 0.07);
+  face.castShadow = true;
+  g.add(face);
+  return { group: g, desc: makeDesc('clocktoy', 0.84, 0.84, 0.24, { round: true, name: 'clock' }) };
+}
+
+export function buildPictureToy(emoji, bg) {
+  const g = new THREE.Group();
+  const tex = canvasTex(160, 160, (ctx, w, h) => {
+    ctx.fillStyle = '#fffdf5'; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = bg; ctx.fillRect(12, 12, w - 24, h - 24);
+    ctx.font = '76px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, w / 2, h / 2 + 6);
+  });
+  const m = new THREE.Mesh(G('box', 0.9, 0.08, 0.9), new THREE.MeshLambertMaterial({ map: tex }));
+  m.position.y = 0.04;
+  m.castShadow = true;
+  g.add(m);
+  return { group: g, desc: makeDesc('picturetoy', 0.9, 0.08, 0.9, { name: 'picture' }) };
+}
+
+// 絵の具ポット: bursts into a colour puddle when it hits the floor hard
+export function buildPaintPot(color) {
+  const g = new THREE.Group();
+  add(g, G('cyl', 0.14, 0.11, 0.22, 12), mat('#f5eee2'), 0, 0.11, 0);
+  add(g, G('cyl', 0.145, 0.145, 0.07, 12), mat(color), 0, 0.245, 0);
+  const label = add(g, G('cyl', 0.142, 0.142, 0.1, 12), mat(color), 0, 0.1, 0);
+  label.scale.set(1.01, 1, 1.01);
+  return {
+    group: g,
+    desc: makeDesc('paintpot', 0.29, 0.3, 0.29, { round: true, paint: color, name: 'paint pot' }),
+  };
+}
+
+// 地下のとびら: appears on the floor after the second コロン
+export function buildCellarDoor(color, accent) {
+  const g = new THREE.Group();
+  add(g, G('box', 1.5, 0.09, 1.2), mat('#a8834f'), 0, 0.045, 0);
+  const flap = new THREE.Group();
+  const fm = add(flap, G('box', 1.24, 0.07, 0.94), mat(color), 0, 0, 0.47);
+  fm.castShadow = true;
+  add(flap, G('tor', 0.09, 0.025, 6, 12), mat(accent), 0, 0.06, 0.78, Math.PI / 2, 0, 0);
+  flap.position.set(0, 0.1, -0.47);
+  g.add(flap);
+  g.userData.flap = flap;
+  // little question-mark sticker: something is under here!
+  const tex = canvasTex(64, 64, (ctx, w, h) => {
+    ctx.fillStyle = '#fff';
+    ctx.font = '800 44px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('★', w / 2, h / 2 + 2);
+  });
+  const st = new THREE.Mesh(G('box', 0.3, 0.02, 0.3), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+  st.position.set(0, 0.15, 0);
+  g.add(st);
+  return {
+    group: g,
+    desc: makeDesc('cellardoor', 1.5, 0.25, 1.2, {
+      fixture: true, name: 'cellar door',
+      device: { type: 'cellardoor', open: false },
+    }),
+  };
+}
+
+export function buildFlower(color, accent) {
+  const g = new THREE.Group();
+  add(g, G('cyl', 0.13, 0.1, 0.16, 10), mat('#c96f4a'), 0, 0.08, 0);
+  add(g, G('cyl', 0.02, 0.02, 0.34, 6), mat('#69b34c'), 0, 0.32, 0);
+  add(g, G('sph', 0.07, 8, 6), mat(accent), 0, 0.52, 0);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    add(g, G('sph', 0.06, 8, 6), mat(color), Math.cos(a) * 0.11, 0.52, Math.sin(a) * 0.11)
+      .scale.set(1, 0.5, 1);
+  }
+  return { group: g, desc: makeDesc('flower', 0.34, 0.6, 0.34, { round: true, name: 'flower' }) };
+}
+
+// --------------------------------------------------- v6: よるのくに
+export function buildStarShard(color = '#ffe066') {
+  const g = new THREE.Group();
+  const glow = new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.55 });
+  const m = new THREE.Mesh(G('cyl', 0.2, 0.2, 0.1, 5), glow);
+  m.position.y = 0.1; m.rotation.y = 0.3; m.castShadow = true;
+  g.add(m);
+  add(g, G('sph', 0.07, 8, 6), glow, 0, 0.14, 0);
+  return { group: g, desc: makeDesc('star', 0.4, 0.2, 0.4, { round: true, name: 'star shard' }) };
+}
+
+export function buildFireflyJar() {
+  const g = new THREE.Group();
+  const glass = new THREE.Mesh(G('cyl', 0.15, 0.15, 0.34, 12),
+    new THREE.MeshLambertMaterial({ color: '#d8f4ea', transparent: true, opacity: 0.4 }));
+  glass.position.y = 0.17;
+  g.add(glass);
+  add(g, G('cyl', 0.16, 0.16, 0.05, 12), mat('#c9a077'), 0, 0.36, 0);
+  const fly = new THREE.MeshLambertMaterial({ color: '#b7ff7a', emissive: '#8cff4a', emissiveIntensity: 0.9 });
+  for (const [fx, fy, fz] of [[0.05, 0.14, 0.03], [-0.06, 0.22, -0.02], [0.01, 0.1, -0.06]]) {
+    add(g, G('sph', 0.025, 6, 5), fly, fx, fy, fz);
+  }
+  return { group: g, desc: makeDesc('fireflyjar', 0.32, 0.4, 0.32, { round: true, buoyant: true, name: 'firefly jar' }) };
+}
+
+export function buildDreamBunny(color = '#e6dcff') {
+  const g = new THREE.Group();
+  add(g, G('sph', 0.2, 14, 10), mat(color), 0, 0.22, 0).scale.set(1, 1.1, 0.9);
+  add(g, G('sph', 0.14, 12, 10), mat(color), 0, 0.5, 0.02);
+  addFace(g, 0.06, 0.54, 0.11, 0.024);
+  add(g, G('sph', 0.03, 6, 5), mat('#f5a9b8'), 0, 0.48, 0.15);
+  for (const s of [-1, 1]) {
+    add(g, G('sph', 0.05, 8, 6), mat(color), s * 0.07, 0.72, 0).scale.set(0.7, 2.4, 0.7);
+    add(g, G('sph', 0.045, 8, 6), mat('#f5c9d8'), s * 0.07, 0.74, 0.02).scale.set(0.4, 1.9, 0.5);
+  }
+  add(g, G('sph', 0.06, 8, 6), mat('#ffffff'), 0, 0.16, -0.2);
+  // a tiny nightcap
+  add(g, G('cone', 0.09, 0.16, 8), mat('#7d6bcc'), 0.02, 0.66, -0.02, 0, 0, 0.3);
+  return { group: g, desc: makeDesc('dreambunny', 0.44, 0.8, 0.4, { round: true, name: 'dream bunny' }) };
+}
+
+// たまごのまほう: these come back TRANSFORMED after the hole eats them
+export function buildEgg() {
+  const g = new THREE.Group();
+  const m = add(g, G('sph', 0.14, 12, 10), mat('#fff8e8'), 0, 0.16, 0);
+  m.scale.set(1, 1.25, 1);
+  return { group: g, desc: makeDesc('egg', 0.28, 0.36, 0.28, { round: true, magic: 'chick', name: 'egg' }) };
+}
+
+export function buildAcorn() {
+  const g = new THREE.Group();
+  add(g, G('sph', 0.12, 10, 8), mat('#c98d4f'), 0, 0.12, 0).scale.set(1, 1.15, 1);
+  add(g, G('sph', 0.125, 10, 8), mat('#7a5433'), 0, 0.2, 0).scale.set(1, 0.55, 1);
+  add(g, G('cyl', 0.02, 0.02, 0.08, 6), mat('#7a5433'), 0, 0.28, 0);
+  return { group: g, desc: makeDesc('acorn', 0.25, 0.3, 0.25, { round: true, magic: 'tree', name: 'acorn' }) };
+}
+
+export function buildSock(color, opt = {}) {
+  const g = new THREE.Group();
+  add(g, G('box', 0.14, 0.3, 0.14), mat(color), 0, 0.2, 0);
+  add(g, G('box', 0.14, 0.12, 0.26), mat(color), 0, 0.06, 0.06);
+  add(g, G('box', 0.16, 0.08, 0.16), mat('#ffffff'), 0, 0.34, 0);
+  return {
+    group: g,
+    desc: makeDesc('sock', 0.2, 0.4, 0.34, { magic: opt.plain ? null : 'sockpair', name: 'sock' }),
+  };
+}
+
+export function buildPaintTube(color) {
+  const g = new THREE.Group();
+  add(g, G('cyl', 0.08, 0.06, 0.3, 10), mat(color), 0, 0.08, 0, 0, 0, Math.PI / 2);
+  add(g, G('cyl', 0.035, 0.035, 0.08, 8), mat('#e8e2d5'), 0.2, 0.08, 0, 0, 0, Math.PI / 2);
+  add(g, G('box', 0.05, 0.13, 0.13), mat('#e8e2d5'), -0.16, 0.08, 0);
+  return {
+    group: g,
+    desc: makeDesc('painttube', 0.46, 0.16, 0.16, { magic: 'rainbowball', name: 'paint tube' }),
+  };
+}
+
+// ...and what they turn into
+export function buildMiniTree() {
+  const g = new THREE.Group();
+  add(g, G('cyl', 0.06, 0.08, 0.3, 8), mat('#8a5a36'), 0, 0.15, 0);
+  add(g, G('cone', 0.28, 0.4, 10), mat('#5faa5f'), 0, 0.48, 0);
+  add(g, G('cone', 0.2, 0.32, 10), mat('#74c476'), 0, 0.72, 0);
+  add(g, G('sph', 0.045, 8, 6), mat('#ff6b6b'), 0.12, 0.5, 0.12);
+  return { group: g, desc: makeDesc('minitree', 0.56, 0.9, 0.56, { round: true, name: 'little tree' }) };
+}
+
+export function buildRainbowBall(r = 0.24) {
+  const g = new THREE.Group();
+  const tex = canvasTex(128, 64, (ctx, w, h) => {
+    const cols = ['#ff6b6b', '#ffa94d', '#ffd43b', '#8ce99a', '#6cc5ff', '#c9a8ff'];
+    const bh = h / cols.length;
+    cols.forEach((c, i) => { ctx.fillStyle = c; ctx.fillRect(0, i * bh, w, bh + 1); });
+  });
+  const m = new THREE.Mesh(G('sph', r, 20, 14), new THREE.MeshLambertMaterial({ map: tex }));
+  m.position.y = r; m.castShadow = true;
+  g.add(m);
+  return { group: g, desc: makeDesc('rainbowball', r * 2, r * 2, r * 2, { round: true, name: 'rainbow ball' }) };
+}
+
 // --------------------------------------------------- v4: dog & cat
 export function buildDog(color = '#e8d3b0') {
   const g = new THREE.Group();
@@ -981,6 +1299,12 @@ function layoutKoron(scene, engine, paletteIndex, rand) {
   // THE LEVER (usable twice: the box tips, then tips again)
   put(buildLever(A[2], A[0]), -9.3, -5.2, { yaw: Math.PI / 2 });
 
+  // wall dwellers: after the first コロン their wall becomes the floor, and
+  // they become FLOOR toys (the clock rolls, the pictures become boards)
+  put(buildWallClock(A[1], A[0]), 4.6, -6.55, { y: 3.1 });
+  put(buildWallPicture('🚗', A[2]), -3.0, -6.55, { y: 2.7 });
+  put(buildWallPicture('🌼', A[4]), 6.9, -6.55, { y: 2.6 });
+
   // small & medium toys that will tumble on each コロン
   put(buildCrayon(A[0]), J(-1.4), J(1.6), { yaw: 0.5 });
   put(buildCrayon(A[2]), J(0.8), J(2.2), { yaw: -1.0 });
@@ -1015,18 +1339,20 @@ function layoutKoron(scene, engine, paletteIndex, rand) {
     put(buildTeapot(A[0]), 6.6, -2.2, { y: t.topY, supportId: tp.id });
     put(buildCup(A[2]), 7.1, -1.8, { y: t.topY, supportId: tp.id });
   }
-  // two bolted shelves: after each コロン they're "on a different wall"
+  // two bolted shelves: after each コロン they're "on a different wall".
+  // the paint pots up here burst into colour puddles when they crash down!
   {
     const ws = buildWallShelf('#c98d5f');
     const wp = put(ws, 2.0, -6.5);
     put(buildBall(A[2], 0.2), 1.5, -6.45, { y: ws.topY, supportId: wp.id });
-    put(buildBook(A[5], 0.42), 2.6, -6.42, { y: ws.topY, supportId: wp.id });
+    put(buildPaintPot('#ff5f5f'), 2.2, -6.5, { y: ws.topY, supportId: wp.id });
+    put(buildPaintPot('#4dabf7'), 2.7, -6.42, { y: ws.topY, supportId: wp.id });
   }
   {
     const ws2 = buildWallShelf('#c98d5f');
     const wp2 = put(ws2, -5.5, -6.5);
     put(buildTeapot(A[1]), -5.6, -6.5, { y: ws2.topY, supportId: wp2.id });
-    put(buildBall(A[0], 0.16), -5.0, -6.55, { y: ws2.topY, supportId: wp2.id });
+    put(buildPaintPot('#ffd43b'), -5.1, -6.55, { y: ws2.topY, supportId: wp2.id });
   }
   // the chick family scatters delightfully on every tumble
   {
@@ -1108,6 +1434,17 @@ function layoutSakasama(scene, engine, paletteIndex, rand) {
       below = put(buildBlock(A[(i + 2) % A.length], 'ABCDE'[i]), tx, tz, { y: 0.34 * i, supportId: below.id });
     }
   }
+  // containers: when the box turns over, their contents visibly spill out
+  {
+    const cb = buildCupboard('#c98d5f', A[4]);
+    const cp = put(cb, -8.8, 1.2, { yaw: Math.PI / 2 });
+    const treats = [buildBall(A[0], 0.18), buildCup(A[5]), buildDice(), buildTeapot(A[1])];
+    treats.forEach((t, i) => {
+      put(t, cp.x, cp.z + (i % 2 ? 0.3 : -0.3), { y: i < 2 ? 0.28 : 0.9, supportId: cp.id });
+    });
+  }
+  put(buildBathtub(pal.tub), 3.6, 5.0, { yaw: -0.2 });
+
   // a modest floor crowd
   put(buildCrayon(A[0]), J(0.6), J(4.2), { yaw: 0.8 });
   put(buildCrayon(A[4]), J(-2.6), J(4.8), { yaw: -0.6 });

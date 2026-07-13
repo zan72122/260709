@@ -3,9 +3,12 @@
 
 import * as THREE from '../vendor/three.module.min.js';
 import { HoleEngine, S, mulberry32 } from './physics.js';
-import { buildRound, spawnPinataContents } from './props.js';
+import {
+  buildRound, spawnPinataContents, spawnNightToys, spawnMagicToy,
+  spawnWallToy, spawnDoodleToy, buildCellarDoor,
+} from './props.js';
 import { HoleView } from './hole.js';
-import { Room, ROOM_W, ROOM_D } from './room.js';
+import { Room, ROOM_W, ROOM_D, DOODLE_SPOTS } from './room.js';
 import { Effects } from './effects.js';
 import { AudioEngine } from './audio.js';
 import { UI } from './ui.js';
@@ -51,6 +54,9 @@ const state = {
   everTapped: false,
   confettiT: 0,
   diveT: 0,
+  koronWave: 0,           // how many times the box has tipped this round
+  night: false,           // さかさま: currently playing on the night side
+  fireflyT: 0,
 };
 while (state.clears.length < 5) state.clears.push(0);
 state.round = 0; // legacy alias (palette index derived per stage)
@@ -126,6 +132,14 @@ function buildLevel() {
   state.entries = [];
   clearPile();
   state.cine = null;
+  state.koronWave = 0;
+  state.night = false;
+  audio.setNight(false);
+  holeView.hidden = false;
+  holeView.setNight(false);
+  clearPuddles();
+  clearHoleSheet();
+  delayed.length = 0;
   worldGroup.rotation.z = 0;
 
   const palette = state.clears[state.stage] % 3;
@@ -166,6 +180,93 @@ function refreshFlipPips() {
       }
     });
   }
+}
+
+// ------------------------------------------------------------ v6 helpers
+// small delayed-action queue (doodle pops, cellar treasure, …)
+const delayed = [];
+function later(t, fn) { delayed.push({ t, fn }); }
+function updateDelayed(dt) {
+  for (let i = delayed.length - 1; i >= 0; i--) {
+    delayed[i].t -= dt;
+    if (delayed[i].t > 0) continue;
+    const d = delayed.splice(i, 1)[0];
+    d.fn();
+  }
+}
+
+// 絵の具の水たまり: a splatty colour stain on the floor (hole-aware)
+const puddleMeshes = [];
+function makePuddleMesh(x, z, r, color) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = color;
+  g.beginPath(); g.arc(64, 64, 40, 0, 7); g.fill();
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2 + i;
+    const rr = 34 + (i % 3) * 9;
+    g.beginPath();
+    g.arc(64 + Math.cos(a) * rr, 64 + Math.sin(a) * rr, 9 + (i % 4) * 4, 0, 7);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(r * 2.3, r * 2.3),
+    new THREE.MeshLambertMaterial({ map: t, transparent: true, depthWrite: false })
+  );
+  holeView.patchFloorMaterial(m.material);
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, 0.012 + puddleMeshes.length * 0.002, z);
+  m.renderOrder = 1;
+  m.scale.set(0.2, 0.2, 1);
+  boxGroup.add(m);
+  puddleMeshes.push(m);
+  tweens.push({
+    t: 0, dur: 0.4, obj: m,
+    fn(o, k) { const s = 0.2 + 0.8 * (1 - (1 - k) * (1 - k)); o.scale.set(s, s, 1); },
+  });
+}
+function clearPuddles() {
+  for (const m of puddleMeshes) boxGroup.remove(m);
+  puddleMeshes.length = 0;
+}
+
+// toys dunked in paint keep the colour forever (even on the treasure pile)
+const _dyeCol = new THREE.Color();
+function tintGroup(g, color) {
+  _dyeCol.set(color);
+  g.traverse((o) => {
+    if (!o.isMesh || !o.material || !o.material.color || o.material.isShaderMaterial) return;
+    o.material = o.material.clone();
+    o.material.color.lerp(_dyeCol, 0.65);
+  });
+}
+
+// さかさま: the hole peels off the old floor and falls as a black sheet
+let holeSheet = null;
+function makeHoleSheet(x, z, r) {
+  const g = new THREE.Group();
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(1, 40),
+    new THREE.MeshBasicMaterial({ color: '#0d0714', side: THREE.DoubleSide })
+  );
+  disc.rotation.x = -Math.PI / 2;
+  g.add(disc);
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(1, 0.05, 8, 40),
+    new THREE.MeshLambertMaterial({ color: '#3d2417' })
+  );
+  rim.rotation.x = -Math.PI / 2;
+  g.add(rim);
+  g.position.set(x, 5.15, z);
+  g.scale.set(r, 1, r);
+  boxGroup.add(g);
+  holeSheet = { g, x, z, r };
+}
+function clearHoleSheet() {
+  if (holeSheet) { boxGroup.remove(holeSheet.g); holeSheet = null; }
 }
 
 // ------------------------------------------------------------ UI
@@ -295,6 +396,8 @@ function updateCamera(dt) {
     camTarget.z += (_holeWorld.z - camTarget.z) * Math.min(1, 4.5 * dt);
     az = cam.az; el = cam.el;
     wantDist = (6.6 + h.r * 3.4) * cam.zoom * (camera.userData.portrait ? 1.35 : 1);
+    // なだれ中は引きで全景 — the whole floor turning into a slide is the show
+    if (state.engine && state.engine.surging) wantDist = Math.max(wantDist, 17);
   } else {
     // title / select: drift around the whole room
     cam.autoAz += dt * 0.1;
@@ -519,6 +622,67 @@ function handleEvents(eng) {
         break;
       }
       case 'rainStart': break;
+      case 'tiltSurgeStart':
+        // なだれ! the floor gives way into one big slide
+        audio.avalanche();
+        state.shake = Math.max(state.shake, 0.35);
+        break;
+      case 'tiltSurgeEnd':
+        audio.boing(0.9);
+        audio.sparkle();
+        break;
+      case 'puddle':
+        makePuddleMesh(ev.x, ev.z, ev.r, ev.color);
+        break;
+      case 'paintSpill':
+        audio.splash();
+        audio.squeezePop(0.5);
+        if (p) effects.dust(p.x, p.z, 1.3, ev.color);
+        state.shake = Math.max(state.shake, 0.1);
+        break;
+      case 'dyed': {
+        audio.sparkle();
+        const e = state.entries.find((en) => en.prop === p);
+        if (e) tintGroup(e.group, ev.color);
+        if (p) effects.dust(p.x, p.z, 0.5, ev.color);
+        break;
+      }
+      case 'cellarDoor': {
+        // the little door that used to be on the wall creaks open…
+        audio.doorBang();
+        audio.magic();
+        state.shake = Math.max(state.shake, 0.15);
+        const e = state.entries.find((en) => en.prop === p);
+        if (e && e.group.userData.flap) {
+          tweens.push({
+            t: 0, dur: 0.5, obj: e.group.userData.flap,
+            fn(o, k) { o.rotation.x = -1.9 * (k < 0.7 ? (k / 0.7) * 1.15 : 1.15 - (k - 0.7) / 0.3 * 0.15); },
+          });
+        }
+        const dx = ev.x, dz = ev.z;
+        later(0.4, () => {
+          // …and the treasure under the floor pops out!
+          const minis = spawnPinataContents(boxGroup, eng, state.round, dx, dz, 6);
+          for (const m of minis) attachShadow(m);
+          state.entries.push(...minis);
+          state.total += minis.length;
+          effects.confettiBurst(dx, dz, 30);
+          effects.popFlash(dx, 0.6, dz, '#ffd166');
+          audio.pinataPop();
+        });
+        break;
+      }
+      case 'magic': {
+        // たまごのまほう: the hole gives back something transformed
+        audio.magic();
+        effects.swallowSparkle(ev.x, ev.z, 0.6, '#fff3b0');
+        effects.popFlash(ev.x, 0.8, ev.z, '#ffe066');
+        const born = spawnMagicToy(boxGroup, eng, ev.kind, ev.x, ev.z);
+        for (const m of born) attachShadow(m);
+        state.entries.push(...born);
+        state.total += born.length;
+        break;
+      }
       case 'teeter': audio.teeter(); break;
       case 'settle': audio.boing(sz); break;
       case 'stuckStart':
@@ -619,6 +783,9 @@ function emojiFor(p) {
   }
   if (p.desc.balloon) return '🎈';
   if (p.desc.waterSource) return '🛁';
+  if (p.desc.kind === 'egg') return '🥚';
+  if (p.desc.kind === 'star') return '⭐';
+  if (p.desc.paint || p.desc.kind === 'painttube') return '🎨';
   return '🧸';
 }
 function updateEdgeMarkers() {
@@ -685,10 +852,12 @@ function updateCine(dt) {
     } else if (!c.crashed) {
       // …CRASH: cut to the box resting on its (new) bottom
       c.crashed = true;
+      state.koronWave++;
       worldGroup.rotation.z = 0;
       audio.crash();
       state.shake = 0.55;
-      room.build(state.round, { boxy: true });
+      // (the doodles stay on the wall until the moment they pop into toys)
+      room.build(state.round, { boxy: true, doodles: state.koronWave === 1 });
       // the lever is bolted to a different wall now
       const dev = c.prop.desc.device;
       const spot = LEVER_SPOTS[Math.min(1 - dev.count, LEVER_SPOTS.length - 1)];
@@ -700,6 +869,49 @@ function updateCine(dt) {
       for (let i = 0; i < 9; i++) {
         effects.dust((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 10, 1.6);
       }
+      if (state.koronWave === 1) {
+        // 壁のものが床のものになる: clock & pictures drop in as floor toys
+        for (const en of state.entries) {
+          const wd = en.prop.desc.device;
+          if (!wd || wd.type !== 'walldecor' || en.prop.state === S.GONE) continue;
+          en.prop.state = S.GONE;   // the wall version is over — it fell off
+          const wx = en.prop.x, wz = Math.min(4.0, en.prop.z + 2.6);
+          const toy = spawnWallToy(boxGroup, eng, wd, state.round, wx, wz);
+          attachShadow(toy);
+          state.entries.push(toy);
+          state.total += 1;
+        }
+        // らくがきが本物になる: each crayon doodle pops into a REAL toy
+        DOODLE_SPOTS.forEach((d, i) => {
+          const dx = (d.u - 0.5) * ROOM_W;
+          const dz = -ROOM_D / 2 + 1.4;
+          later(0.9 + i * 0.4, () => {
+            const toy = spawnDoodleToy(boxGroup, state.engine, state.round, d.kind, dx, dz);
+            attachShadow(toy);
+            state.entries.push(toy);
+            state.total += 1;
+            audio.magic();
+            effects.popFlash(dx, 1.0, dz, '#ffd43b');
+            effects.dust(dx, dz, 0.9, '#ffe9b8');
+            // the drawing left the wall — wipe it off the cardboard
+            if (i === DOODLE_SPOTS.length - 1) {
+              room.build(state.round, { boxy: true, doodles: false });
+            }
+          });
+        });
+      } else if (state.koronWave === 2) {
+        // とびらが床に来た! a little trapdoor lands in the middle of the room
+        later(0.9, () => {
+          const cd = buildCellarDoor('#e8dcc8', '#8895a5');
+          const p = state.engine.addProp(cd.desc, 4.2, -1.5);
+          cd.group.position.set(4.2, 0, -1.5);
+          boxGroup.add(cd.group);
+          state.entries.push({ prop: p, group: cd.group, built: cd });
+          audio.doorBang();
+          effects.popFlash(4.2, 0.5, -1.5, '#ffd166');
+          effects.dust(4.2, -1.5, 1.2);
+        });
+      }
     } else if (c.t > 2.6) {
       eng.frozen = false;
       c.prop.desc.device.busy = false;
@@ -708,7 +920,8 @@ function updateCine(dt) {
     return;
   }
 
-  // flip (さかさま)
+  // flip (さかさま): the box turns right over — and on the other side of
+  // the ceiling there is a whole hidden night room (よるのくに)
   if (c.t < 0.4) {
     if (!c.popped) { c.popped = true; audio.squeezePop(0.3); }
   } else if (c.t < 2.6) {
@@ -717,25 +930,90 @@ function updateCine(dt) {
     const e2 = k * k * (3 - 2 * k);
     worldGroup.rotation.z = Math.PI * e2;
     if (!c.wh) { c.wh = true; audio.flipWhoosh(); }
-  } else if (c.t < 3.8) {
+    // 入れ物の中身が出る: cupboard doors flop open under gravity
+    if (!c.spilled && k > 0.55) {
+      c.spilled = true;
+      for (const en of state.entries) {
+        if (en.group.userData.doors && en.prop.state !== S.GONE) {
+          for (const door of en.group.userData.doors) {
+            tweens.push({
+              t: 0, dur: 0.5, obj: door,
+              fn(o, k2) { o.rotation.y = o.userData.openAngle * (k2 < 0.7 ? (k2 / 0.7) * 1.2 : 1.2 - (k2 - 0.7) / 0.3 * 0.2); },
+            });
+          }
+          const dev = en.prop.desc.device;
+          if (dev && dev.type === 'cupboard') dev.open = true;
+        }
+      }
+      audio.doorBang();
+      audio.rattle();
+    }
+  } else if (c.t < 3.3) {
     worldGroup.rotation.z = Math.PI;
     if (!c.held) { c.held = true; audio.boing(0.5); state.shake = 0.2; }
-  } else if (c.t < 5.8) {
-    // …and back — the toys stay up there, then rain down
-    if (!c.rained) {
-      c.rained = true;
-      eng.rainAll({ stagger: 0.16, yMin: 5.5, ySpan: 3, scatter: 1.5 });
-      audio.flipWhoosh();
-    }
-    const k = (c.t - 3.8) / 2;
-    const e2 = k * k * (3 - 2 * k);
-    worldGroup.rotation.z = Math.PI * (1 - e2);
   } else {
-    worldGroup.rotation.z = 0;
-    eng.frozen = false;
-    c.prop.desc.device.busy = false;
-    refreshFlipPips();
-    state.cine = null;
+    if (!c.cut) {
+      // CUT: we are now standing in the OTHER room (night⇄day). the hole
+      // stayed glued to the old floor — so for a moment there is NO hole.
+      c.cut = true;
+      worldGroup.rotation.z = 0;
+      state.night = !state.night;
+      room.build(state.round, state.night ? { night: true } : {});
+      audio.setNight(state.night);
+      holeView.setNight(state.night);
+      audio.flipWhoosh();
+      const hx = eng.hole.x, hz = eng.hole.z;
+      eng.hole.x = -hx; eng.hole.vx = 0; eng.hole.vz = 0;   // the room flipped!
+      eng.holeTarget.x = -hx; eng.holeTarget.z = hz;
+      holeView.hidden = true;
+      makeHoleSheet(-hx, hz, Math.max(0.3, eng.hole.rShow));
+      state.shake = 0.2;
+    }
+    if (c.t < 4.6) {
+      // 穴がベチャッと落ちてくる: the peeled-off hole flutters down
+      const k = Math.min(1, (c.t - 3.3) / 1.3);
+      if (holeSheet) {
+        const g = holeSheet.g;
+        g.position.y = 5.15 * (1 - k * k) + 0.03;
+        g.position.x = holeSheet.x + Math.sin(k * 9) * 0.5 * (1 - k);
+        g.rotation.z = Math.sin(k * 11) * 0.35 * (1 - k * 0.6);
+        g.rotation.x = Math.sin(k * 7) * 0.3 * (1 - k * 0.6);
+        const flut = 1 + Math.sin(k * 22) * 0.12 * (1 - k);
+        g.scale.set(holeSheet.r * flut, 1, holeSheet.r * (2 - flut));
+      }
+    } else if (!c.splatted) {
+      // ベチャッ!! …and the hole is a hole again, on the NEW floor
+      c.splatted = true;
+      clearHoleSheet();
+      holeView.hidden = false;
+      audio.splat();
+      state.shake = 0.35;
+      effects.ring(eng.hole.x, eng.hole.z, 0.2, eng.hole.rShow * 2.2, 0.5, '#c9b8ff');
+      effects.dust(eng.hole.x, eng.hole.z, 1.4, '#5a4a72');
+      // …then everything rains down onto it
+      eng.rainAll({ stagger: 0.13, yMin: 5.5, ySpan: 3, scatter: 1.5 });
+      audio.flipWhoosh();
+      if (state.night && !c.nightSpawned) {
+        // よるのくに limited-edition toys tumble out of the dark
+        c.nightSpawned = true;
+        const nightToys = spawnNightToys(boxGroup, eng, mulberry32(9000 + state.clears[4] * 3));
+        for (const m of nightToys) attachShadow(m);
+        state.entries.push(...nightToys);
+        state.total += nightToys.length;
+        // the bathtub sloshed its water out on the way over
+        for (const en of state.entries) {
+          if (en.prop.desc.waterSource && en.prop.state !== S.GONE) {
+            effects.splash(en.prop.x, en.prop.z, true);
+            audio.glug();
+          }
+        }
+      }
+    } else if (c.t > 5.6) {
+      eng.frozen = false;
+      c.prop.desc.device.busy = false;
+      refreshFlipPips();
+      state.cine = null;
+    }
   }
 }
 
@@ -913,6 +1191,22 @@ function tick() {
       state.idleT += dt;
       if (state.idleT > 12 && !pointerDown) { ui.showHint(true); }
 
+      // よるのくに ambience: fireflies drifting through the dark
+      if (state.night) {
+        state.fireflyT -= dt;
+        if (state.fireflyT <= 0) {
+          state.fireflyT = 0.3;
+          effects.firefly((Math.random() - 0.5) * 16, 0.5 + Math.random() * 2.6, (Math.random() - 0.5) * 10);
+        }
+      }
+      // なだれの地響き
+      if (eng.surging) {
+        audio.avalanche();
+        if (Math.random() < 0.3) {
+          effects.dust((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 10, 0.8);
+        }
+      }
+
       if (remaining === 0) {
         // the grand dive down to the bottom world
         state.mode = 'dive';
@@ -943,6 +1237,7 @@ function tick() {
   }
 
   updateTweens(dt);
+  updateDelayed(dt);
   updatePile(dt);
 
   effects.update(dt);

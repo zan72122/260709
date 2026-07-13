@@ -88,6 +88,7 @@ export class Prop {
     this.floatSinkAt = 0;
     this.bounces = 0;
     this.fear = 0;                        // 0..1, drives scared faces
+    this.dye = null;                      // paint puddle colour it walked into
     this.shakeT = 0;                      // furniture rattle amount
     // topple bookkeeping
     this.pivotX = 0; this.pivotZ = 0;
@@ -135,6 +136,8 @@ export function makeDesc(kind, sx, sy, sz, opt = {}) {
     walker: opt.walker || null,
     pinata: !!opt.pinata,
     device: opt.device || null,   // slide / seesaw / cupboard / tramp / rail
+    paint: opt.paint || null,     // paint pot: spills this colour on impact
+    magic: opt.magic || null,     // comes back transformed after being eaten
     yaw: opt.yaw || 0,
     name: opt.name || kind,
   };
@@ -174,6 +177,17 @@ export class HoleEngine {
     this.tiltVel = 0;
     this.maxTilt = opt.maxTilt || 0.14;   // ≈8°
     this.frozen = false;           // cinematic in progress: physics holds
+    // なだれ: keep the floor pegged at max tilt long enough and it gives way
+    // into a much steeper avalanche — even boxes slide, the floor is a slide
+    this.surging = false;
+    this.surgeT = 0;
+    this.surgeMax = opt.surgeMax || 0.42; // ≈24°
+    this._surgeHeat = 0;
+    this._surgeCd = 0;
+    // 絵の具: spilled paint stains the floor, and toys that walk through it
+    this.puddles = [];             // {x, z, r, color}
+    // たまごのまほう: some night toys come back transformed after a meal
+    this.magicQueue = [];          // {t, kind, fromId}
   }
 
   addProp(desc, x, z, opt = {}) {
@@ -255,6 +269,7 @@ export class HoleEngine {
       this.emit('waterFill', p);
     }
     if (p.desc.pinata) this.emit('pinata', p, { x: this.hole.x, z: this.hole.z });
+    if (p.desc.magic) this.magicQueue.push({ t: 1.3, kind: p.desc.magic, fromId: p.id });
     if (!p.desc.waterSource && !p.desc.walker && this.belly.length < 3) this.belly.push(p);
     if (p.footR > 0.55) this.burps.push({ t: 1.1 + this.rand() * 0.5 });
     // each meal charges the flip button a little
@@ -265,6 +280,38 @@ export class HoleEngine {
         this.emit('flipCharge', q, { charge: dv.charge, need: dv.need });
       }
     }
+  }
+
+  // spilled paint: a coloured stain on the floor that dyes passing toys
+  addPuddle(x, z, r, color) {
+    this.puddles.push({ x, z, r, color });
+    this.emit('puddle', null, { x, z, r, color });
+  }
+
+  _dyeCheck(p) {
+    if (p.dye || !this.puddles.length || p.desc.fixture) return;
+    for (const pu of this.puddles) {
+      if (Math.hypot(p.x - pu.x, p.z - pu.z) < pu.r * 0.85) {
+        p.dye = pu.color;
+        this.emit('dyed', p, { color: pu.color });
+        return;
+      }
+    }
+  }
+
+  // drop a brand-new prop from the sky (wall toys after a コロン, night toys)
+  dropSpawn(desc, x, z, opt = {}) {
+    const p = this.addProp(desc, x, z, { state: S.TOSSED, yaw: opt.yaw });
+    p.y = opt.y ?? (4.5 + this.rand() * 2);
+    p.t = -(opt.delay || 0);
+    if (p.t < 0) p._raining = true;
+    p.bounces = 0;
+    p.vx = (opt.vx ?? (this.rand() - 0.5) * 1.4);
+    p.vz = (opt.vz ?? (this.rand() - 0.5) * 1.4);
+    p.vy = 0;
+    p.spin = 3 + this.rand() * 4;
+    p.spinAxis = this._randAxis();
+    return p;
   }
 
   // spawn a burst of mini props (piñata contents). descs: [{desc, ...}]
@@ -327,7 +374,31 @@ export class HoleEngine {
           torque += p.desc.mass * p.x;
         }
       }
-      const target = Math.max(-this.maxTilt, Math.min(this.maxTilt, torque * 0.012));
+      let target = Math.max(-this.maxTilt, Math.min(this.maxTilt, torque * 0.012));
+      // なだれ判定: the tilt has been pegged at its limit for a while →
+      // the floor "gives way" and heaves into a proper avalanche slope
+      this._surgeCd = Math.max(0, this._surgeCd - dt);
+      if (!this.surging) {
+        const pegged = Math.abs(this.tilt) > this.maxTilt * 0.93 &&
+          Math.sign(torque || 1) === Math.sign(this.tilt || 1);
+        if (pegged && this._surgeCd <= 0) {
+          this._surgeHeat += dt;
+          if (this._surgeHeat > 1.2) {
+            this.surging = true; this.surgeT = 0;
+            this.emit('tiltSurgeStart', null, { dir: Math.sign(this.tilt) || 1 });
+          }
+        } else {
+          this._surgeHeat = Math.max(0, this._surgeHeat - dt * 2);
+        }
+      }
+      if (this.surging) {
+        this.surgeT += dt;
+        target = (Math.sign(this.tilt || torque || 1)) * this.surgeMax;
+        if (this.surgeT > 5.5) {
+          this.surging = false; this._surgeHeat = 0; this._surgeCd = 5;
+          this.emit('tiltSurgeEnd');
+        }
+      }
       const k = 2.2, damp = 2.6;
       this.tiltVel += (target - this.tilt) * k * dt;
       this.tiltVel *= Math.exp(-damp * dt);
@@ -381,6 +452,15 @@ export class HoleEngine {
         p.spin = 5 + this.rand() * 4; p.spinAxis = this._randAxis();
         this.emit('burpSpit', p);
       }
+    }
+
+    // たまごのまほう: a beat after eating a magic toy, the hole gives back
+    // something new — the egg hatches, the acorn sprouts, socks pair up
+    for (let i = this.magicQueue.length - 1; i >= 0; i--) {
+      this.magicQueue[i].t -= dt;
+      if (this.magicQueue[i].t > 0) continue;
+      const m = this.magicQueue.splice(i, 1)[0];
+      this.emit('magic', null, { kind: m.kind, x: h.x, z: h.z });
     }
 
     // seesaws watch their loaded pan
@@ -459,7 +539,9 @@ export class HoleEngine {
       }
 
       case S.WANDER: {
+        if (this.tiltFloor && this.surging) this._tiltRoll(p, dt);
         this._updateWalker(p, dt);
+        this._dyeCheck(p);
         return;
       }
 
@@ -531,12 +613,14 @@ export class HoleEngine {
         }
         if (p.desc.fixture) { this._updateFixture(p, dt); return; }
         if (this.tiltFloor) this._tiltRoll(p, dt);
+        this._dyeCheck(p);
         this._evaluateFloor(p, dt);
         return;
       }
 
       case S.TEETER: {
         if (this.tiltFloor) this._tiltRoll(p, dt);
+        this._dyeCheck(p);
         this._evaluateFloor(p, dt);
         return;
       }
@@ -803,6 +887,13 @@ export class HoleEngine {
           p.bounces++;
           this.emit('thud', p, { strength: Math.min(1, -p.vy / 8) });
           p.squash = Math.min(0.5, -p.vy * 0.06);
+          // a paint pot bursts on its first hard landing → a colour puddle
+          if (p.desc.paint && !p._spilled && -p.vy > 2.6) {
+            p._spilled = true;
+            this.addPuddle(p.x, p.z, 0.95 + p.footR, p.desc.paint);
+            this.emit('paintSpill', p, { color: p.desc.paint });
+          }
+          this._dyeCheck(p);
           if (p.bounces >= 3 || -p.vy < 2.2) {
             p.state = p.desc.walker ? S.WANDER : S.REST;
             p.t = 0;
@@ -857,7 +948,12 @@ export class HoleEngine {
   _tiltRoll(p, dt) {
     const slope = this.tilt;
     const a = G * Math.sin(slope);
-    if (p.desc.round) {
+    if (this.surging) {
+      // なだれ: friction has lost — EVERYTHING slides down the giant slide
+      p.vx += a * (p.desc.round ? 0.9 : 0.6) * dt;
+      p.vx *= Math.exp(-0.3 * dt);
+      p.wobble = Math.max(p.wobble, 0.25);
+    } else if (p.desc.round) {
       p.vx += a * 0.65 * dt;
       p.vx *= Math.exp(-0.4 * dt);
     } else if (Math.abs(slope) > 0.105) {   // ≈6°: static friction gives way
@@ -981,6 +1077,12 @@ export class HoleEngine {
         dev.busy = true;
         dev.charge = 0;
         this.emit('flip', p);
+      }
+      // コロン: the little door that was ON THE WALL is now a trapdoor in
+      // the floor — park the hole beside it and it creaks open: treasure!
+      if (dev && dev.type === 'cellardoor' && !dev.open) {
+        dev.open = true;
+        this.emit('cellarDoor', p, { x: p.x, z: p.z });
       }
       // the cupboard bursts open and dumps its treasure once
       if (dev && dev.type === 'cupboard' && !dev.open) {

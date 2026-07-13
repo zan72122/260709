@@ -126,6 +126,13 @@ export class Effects {
     }
   }
 
+  // よるのくに: a slow drifting glow-fly
+  firefly(x, y, z) {
+    this._spawn(x, y, z,
+      (Math.random() - 0.5) * 0.5, 0.15 + Math.random() * 0.3, (Math.random() - 0.5) * 0.5,
+      Math.random() < 0.7 ? '#b7ff7a' : '#fff3b0', 1.6 + Math.random() * 1.2, 0);
+  }
+
   splash(x, z, big = false) {
     const n = big ? 26 : 14;
     for (let i = 0; i < n; i++) {
